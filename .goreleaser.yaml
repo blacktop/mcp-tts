@@ -1,0 +1,106 @@
+# This is an example .goreleaser.yml file with some sensible defaults.
+# Make sure to check the documentation at https://goreleaser.com
+
+# The lines below are called `modelines`. See `:help modeline`
+# Feel free to remove those if you don't want/need to use them.
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+# vim: set ts=2 sw=2 tw=0 fo=cnqoj
+
+version: 2
+
+before:
+  hooks:
+    # You may remove this if you don't use go modules.
+    - go mod tidy
+    # you may remove this if you don't need go generate
+    - go generate ./...
+    - ./hack/make/completions
+
+builds:
+  - id: default
+    binary: TEMPLATE
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+
+universal_binaries:
+  - replace: false
+
+archives:
+  - formats: tar.gz
+    # this name template makes the OS and Arch compatible with the results of `uname`.
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_
+      {{- if eq .Os "darwin" }}macOS
+      {{- else if eq .Os "ios" }}iOS
+      {{- else }}{{ .Os }}{{ end }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else if eq .Arch "all" }}universal
+      {{- else }}{{ .Arch }}{{ end }}
+    # use zip for windows archives
+    format_overrides:
+      - goos: windows
+        formats: zip
+
+brews:
+  - repository:
+      owner: blacktop
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    goarm: "7"
+    homepage: https://github.com/blacktop/TEMPLATE
+    description: TEMPLATE
+    license: MIT
+    install: |
+      bin.install "TEMPLATE"
+      bash_completion.install "completions/_bash" => "TEMPLATE"
+      zsh_completion.install "completions/_zsh" => "_TEMPLATE"
+      fish_completion.install "completions/_fish" => "TEMPLATE.fish"
+    test: |
+      system "#{bin}/TEMPLATE --help"
+
+changelog:
+  sort: asc
+  use: github
+  groups:
+    - title: Dependency updates
+      regexp: '^.*?(.+)\(deps\)!?:.+$'
+      order: 300
+    - title: "New Features"
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 100
+    - title: "Security updates"
+      regexp: '^.*?sec(\(.+\))??!?:.+$'
+      order: 150
+    - title: "Bug fixes"
+      regexp: '^.*?(fix|refactor)(\(.+\))??!?:.+$'
+      order: 200
+    - title: "Documentation updates"
+      regexp: ^.*?docs?(\(.+\))??!?:.+$
+      order: 400
+    - title: "Build process updates"
+      regexp: ^.*?(build|ci)(\(.+\))??!?:.+$
+      order: 400
+    - title: Other work
+      order: 9999
+  filters:
+    include:
+      - "^feat.*"
+      - "^fix.*"
+      - "^chore.*"
+      - "^sec.*"
+      - "^(doc|docs).*"
+
+release:
+  footer: |
+    ### Summary
+    **Full Changelog**: https://github.com/blacktop/TEMPLATE/compare/{{ .PreviousTag }}...{{ .Tag }}
+    ## What to do next?
+    - Follow us on [Twitter](https://twitter.com/blacktop__)
+    - Follow us on [Mastodon](https://mastodon.social/@blacktop)
+    - Follow us on [Bluesky](https://bsky.app/profile/blacktop.bsky.social)
