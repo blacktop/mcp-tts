@@ -61,37 +61,37 @@ func main() {
 	}
 	fmt.Println()
 
-	// // Say
-	// fmt.Println("Say...")
-	// sayRequest := mcp.CallToolRequest{}
-	// sayRequest.Params.Name = "say"
-	// sayRequest.Params.Arguments = map[string]any{
-	// 	"text": "Hello, world!",
-	// 	// "voice": "Daniel",
-	// }
+	// Say
+	fmt.Println("Say...")
+	sayRequest := mcp.CallToolRequest{}
+	sayRequest.Params.Name = "say"
+	sayRequest.Params.Arguments = map[string]any{
+		"text": "Hello, world!",
+		// "voice": "Daniel",
+	}
 
-	// result, err := c.CallTool(ctx, sayRequest)
-	// if err != nil {
-	// 	log.Fatalf("Failed to run say: %v", err)
-	// }
-	// printToolResult(result)
-	// fmt.Println()
+	result, err := c.CallTool(ctx, sayRequest)
+	if err != nil {
+		log.Fatalf("Failed to run say: %v", err)
+	}
+	printToolResult(result)
+	fmt.Println()
 
-	// // ElevenLabs
-	// fmt.Println("ElevenLabs...")
-	// elevenLabsRequest := mcp.CallToolRequest{}
-	// elevenLabsRequest.Params.Name = "elevenlabs"
-	// elevenLabsRequest.Params.Arguments = map[string]any{
-	// 	"text":  "Hello, world!",
-	// 	"voice": "V9fdGZs6AiHI4uyiAiza",
-	// }
+	// ElevenLabs
+	fmt.Println("ElevenLabs...")
+	elevenLabsRequest := mcp.CallToolRequest{}
+	elevenLabsRequest.Params.Name = "elevenlabs"
+	elevenLabsRequest.Params.Arguments = map[string]any{
+		"text":  "Hello, world!",
+		"voice": "V9fdGZs6AiHI4uyiAiza",
+	}
 
-	// result, err = c.CallTool(ctx, elevenLabsRequest)
-	// if err != nil {
-	// 	log.Fatalf("Failed to run elevenlabs: %v", err)
-	// }
-	// printToolResult(result)
-	// fmt.Println()
+	result, err = c.CallTool(ctx, elevenLabsRequest)
+	if err != nil {
+		log.Fatalf("Failed to run elevenlabs: %v", err)
+	}
+	printToolResult(result)
+	fmt.Println()
 }
 
 // Helper function to print tool results
