@@ -14,9 +14,21 @@
 </p>
 <br>
 
-## Why? 🤔
+## What? 🤔
 
-Adds Text-to-Speech to things like Claude Desktop and Cursor IDE.
+Adds Text-to-Speech to things like Claude Desktop and Cursor IDE.  
+
+It registers two tools: 
+ - `say` 
+ - `elevenlabs`
+
+### `say`
+
+Uses the macOS `say` binary to speak the text
+
+### `elevenlabs`
+
+Uses the [elevenlabs](https://elevenlabs.io/app/speech-synthesis/text-to-speech) text-to-speech API to speak the text
 
 ## Getting Started
 
@@ -41,6 +53,21 @@ Usage:
 Flags:
   -h, --help      help for mcp-say
   -v, --verbose   Enable verbose debug logging
+```
+
+#### Set Claude Desktop Config
+
+```json
+{
+  "mcpServers": {
+    "say": {
+      "command": "mcp-say",
+      "env": {
+        "ELEVENLABS_API_KEY": "********"
+      }
+    }
+  }
+}
 ```
 
 ### Test
