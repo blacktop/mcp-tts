@@ -5,6 +5,13 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Launch TEST",
+            "type": "go",
+            "request": "launch",
+            "mode": "debug",
+            "program": "${workspaceFolder}/test/main.go"
+        },
+        {
             "name": "Attach to mcp-say",
             "type": "go",
             "debugAdapter": "dlv-dap",

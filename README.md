@@ -16,7 +16,7 @@
 
 ## Why? 🤔
 
-<!-- Fill this out -->
+Adds Text-to-Speech to things like Claude Desktop and Cursor IDE.
 
 ## Getting Started
 
@@ -26,9 +26,37 @@
 go install github.com/blacktop/mcp-say@latest
 ```
 
-<!-- Fill this out -->
+```bash
+❱ mcp-say --help
 
-![demo](vhs.gif)
+TTS (text-to-speech) MCP Server.
+
+Provides a text-to-speech service using the MacOS 'say' command.
+
+Designed to be used with the MCP protocol.
+
+Usage:
+  mcp-say [flags]
+
+Flags:
+  -h, --help      help for mcp-say
+  -v, --verbose   Enable verbose debug logging
+```
+
+### Test
+
+```bash
+❱ cat test/say.json | go run main.go --verbose
+
+2025/03/23 22:41:49 INFO Starting MCP server name="Say TTS Service" version=1.0.0
+2025/03/23 22:41:49 DEBU Say tool called request="{Request:{Method:tools/call Params:{Meta:<nil>}} Params:{Name:say Arguments:map[text:Hello, world!] Meta:<nil>}}"
+2025/03/23 22:41:49 DEBU Executing say command args="[--rate 200 Hello, world!]"
+2025/03/23 22:41:49 INFO Speaking text text="Hello, world!"
+```
+```json
+{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"Speaking: Hello, world!"}]}}
+```
+
 
 ## License
 

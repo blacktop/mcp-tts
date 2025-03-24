@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","id":4,"params":{"name":"elevenlabs","arguments":{"text":"Hello, world!"}},"method":"tools/call"}

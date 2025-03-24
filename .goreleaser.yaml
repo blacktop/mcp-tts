@@ -25,6 +25,10 @@ builds:
       - linux
       - windows
       - darwin
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    flags:
+      - -trimpath
+    ldflags: -s -w -X github.com/blacktop/mcp-say/cmd/mcp-say/cmd.Version={{.Version}}
 
 universal_binaries:
   - replace: false
