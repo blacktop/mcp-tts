@@ -13,3 +13,8 @@ build:
 release:
 	@echo "🚀 Releasing Version $(shell svu current)"
 	goreleaser build --id default --clean --snapshot --single-target --output dist/mcp-say
+
+.PHONY: snapshot
+snapshot:
+	@echo "🚀 Snapshot Version $(shell svu current)"
+	goreleaser --clean --timeout 60m --snapshot
