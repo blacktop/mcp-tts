@@ -21,6 +21,11 @@ jobs:
         name: Set up Go
         uses: actions/setup-go@v5
       -
+        name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev
+      -
         name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
