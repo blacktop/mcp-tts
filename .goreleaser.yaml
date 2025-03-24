@@ -31,7 +31,7 @@ builds:
     ldflags: -s -w -X github.com/blacktop/mcp-say/cmd/mcp-say/cmd.Version={{.Version}}
 
 universal_binaries:
-  - replace: false
+  - replace: true
 
 archives:
   - formats: tar.gz
