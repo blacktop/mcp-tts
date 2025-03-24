@@ -19,7 +19,7 @@ jobs:
           go-version: "stable"
       - name: Build
         run: |
-          sudo go build -o /usr/local/bin/TEMPLATE main.go
+          sudo go build -o /usr/local/bin/mcp-say main.go
       - uses: charmbracelet/vhs-action@v2
         with:
           path: 'vhs.tape'

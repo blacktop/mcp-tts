@@ -1,5 +1,5 @@
 /*
-Copyright © 2024 blacktop
+Copyright © 2025 blacktop
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -22,24 +22,60 @@ THE SOFTWARE.
 package cmd
 
 import (
+	"log"
+	"net/http"
 	"os"
+	"os/exec"
 
 	"github.com/spf13/cobra"
 )
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "TEMPLATE",
-	Short: "A brief description of your application",
-	Long: `A longer description that spans multiple lines and likely contains
-examples and usage of using your application. For example:
+	Use:   "mcp-say",
+	Short: "TTS (text-to-speech) MCP Server",
+	Long: `mcp-say is a TTS (text-to-speech) MCP Server.
 
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
+It is a simple HTTP server that listens for requests on port 8080 and responds with a TTS stream.
+
+It is designed to be used with the MCP protocol.`,
 	// Uncomment the following line if your bare application
 	// has an action associated with it:
-	// Run: func(cmd *cobra.Command, args []string) { },
+	Run: func(cmd *cobra.Command, args []string) {
+		http.HandleFunc("/speak", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+
+			// Get text from request
+			if err := r.ParseForm(); err != nil {
+				http.Error(w, "Failed to parse form", http.StatusBadRequest)
+				return
+			}
+			text := r.FormValue("text")
+			if text == "" {
+				http.Error(w, "Text is required", http.StatusBadRequest)
+				return
+			}
+
+			// Execute the say command
+			cmd := exec.Command("/usr/bin/say", "--rate=200", text)
+			if err := cmd.Start(); err != nil {
+				log.Printf("Failed to start say command: %v", err)
+				http.Error(w, "Failed to process speech", http.StatusInternalServerError)
+				return
+			}
+
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("Speaking: " + text))
+		})
+
+		log.Println("Starting MCP server on :8080")
+		if err := http.ListenAndServe(":8080", nil); err != nil {
+			log.Fatalf("Failed to start server: %v", err)
+		}
+	},
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -56,7 +92,7 @@ func init() {
 	// Cobra supports persistent flags, which, if defined here,
 	// will be global for your application.
 
-	// rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.TEMPLATE.yaml)")
+	// rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.mcp-say.yaml)")
 
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.

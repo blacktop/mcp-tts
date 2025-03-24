@@ -18,7 +18,7 @@ before:
 
 builds:
   - id: default
-    binary: TEMPLATE
+    binary: mcp-say
     env:
       - CGO_ENABLED=0
     goos:
@@ -53,16 +53,16 @@ brews:
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Formula
     goarm: "7"
-    homepage: https://github.com/blacktop/TEMPLATE
-    description: TEMPLATE
+    homepage: https://github.com/blacktop/mcp-say
+    description: mcp-say
     license: MIT
     install: |
-      bin.install "TEMPLATE"
-      bash_completion.install "completions/_bash" => "TEMPLATE"
-      zsh_completion.install "completions/_zsh" => "_TEMPLATE"
-      fish_completion.install "completions/_fish" => "TEMPLATE.fish"
+      bin.install "mcp-say"
+      bash_completion.install "completions/_bash" => "mcp-say"
+      zsh_completion.install "completions/_zsh" => "_mcp-say"
+      fish_completion.install "completions/_fish" => "mcp-say.fish"
     test: |
-      system "#{bin}/TEMPLATE --help"
+      system "#{bin}/mcp-say --help"
 
 changelog:
   sort: asc
@@ -99,7 +99,7 @@ changelog:
 release:
   footer: |
     ### Summary
-    **Full Changelog**: https://github.com/blacktop/TEMPLATE/compare/{{ .PreviousTag }}...{{ .Tag }}
+    **Full Changelog**: https://github.com/blacktop/mcp-say/compare/{{ .PreviousTag }}...{{ .Tag }}
     ## What to do next?
     - Follow us on [Twitter](https://twitter.com/blacktop__)
     - Follow us on [Mastodon](https://mastodon.social/@blacktop)

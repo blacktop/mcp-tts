@@ -5,7 +5,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Attach to TEMPLATE",
+            "name": "Attach to mcp-say",
             "type": "go",
             "debugAdapter": "dlv-dap",
             "request": "attach",
