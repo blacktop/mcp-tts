@@ -61,20 +61,46 @@ func main() {
 	}
 	fmt.Println()
 
+	// List Prompts
+	fmt.Println("Listing available prompts...")
+	promptsRequest := mcp.ListPromptsRequest{}
+	prompts, err := c.ListPrompts(ctx, promptsRequest)
+	if err != nil {
+		log.Fatalf("Failed to list prompts: %v", err)
+	}
+	for _, prompt := range prompts.Prompts {
+		fmt.Printf("- %s: %s\n", prompt.Name, prompt.Description)
+	}
+	fmt.Println()
+
+	// Get Prompt
+	fmt.Println("Get Prompt...")
+	getPromptRequest := mcp.GetPromptRequest{}
+	getPromptRequest.Params.Name = "say"
+	getPromptRequest.Params.Arguments = map[string]string{
+		"text": "Hello, Prompt!",
+	}
+	promptResult, err := c.GetPrompt(ctx, getPromptRequest)
+	if err != nil {
+		log.Fatalf("Failed to get prompt: %v", err)
+	}
+	printPromptResult(promptResult)
+	fmt.Println()
+
 	// Say
 	fmt.Println("Say...")
 	sayRequest := mcp.CallToolRequest{}
 	sayRequest.Params.Name = "say"
 	sayRequest.Params.Arguments = map[string]any{
-		"text": "Hello, world!",
+		"text": "Hello, Say Tool!",
 		// "voice": "Daniel",
 	}
 
-	result, err := c.CallTool(ctx, sayRequest)
+	toolResult, err := c.CallTool(ctx, sayRequest)
 	if err != nil {
 		log.Fatalf("Failed to run say: %v", err)
 	}
-	printToolResult(result)
+	printToolResult(toolResult)
 	fmt.Println()
 
 	// ElevenLabs
@@ -82,15 +108,15 @@ func main() {
 	elevenLabsRequest := mcp.CallToolRequest{}
 	elevenLabsRequest.Params.Name = "elevenlabs"
 	elevenLabsRequest.Params.Arguments = map[string]any{
-		"text":  "Hello, world!",
+		"text":  "Hello, from ElevenLabs!",
 		"voice": "V9fdGZs6AiHI4uyiAiza",
 	}
 
-	result, err = c.CallTool(ctx, elevenLabsRequest)
+	toolResult, err = c.CallTool(ctx, elevenLabsRequest)
 	if err != nil {
 		log.Fatalf("Failed to run elevenlabs: %v", err)
 	}
-	printToolResult(result)
+	printToolResult(toolResult)
 	fmt.Println()
 }
 
@@ -102,6 +128,20 @@ func printToolResult(result *mcp.CallToolResult) {
 		} else {
 			jsonBytes, _ := json.MarshalIndent(content, "", "  ")
 			fmt.Println(string(jsonBytes))
+		}
+	}
+}
+
+// Helper function to print prompt results
+func printPromptResult(result *mcp.GetPromptResult) {
+	for _, message := range result.Messages {
+		if message.Role == mcp.RoleAssistant {
+			if textContent, ok := message.Content.(mcp.TextContent); ok {
+				fmt.Println(textContent.Text)
+			} else {
+				jsonBytes, _ := json.MarshalIndent(message.Content, "", "  ")
+				fmt.Println(string(jsonBytes))
+			}
 		}
 	}
 }
