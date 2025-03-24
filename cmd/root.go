@@ -125,9 +125,38 @@ Designed to be used with the MCP protocol.`,
 					args = append(args, "--rate", "200") // Default rate
 				}
 
-				// Add voice if provided
+				// Add voice if provided and validate it
 				if voice, ok := request.Params.Arguments["voice"].(string); ok && voice != "" {
+					// Simple validation to prevent command injection
+					// Only allow alphanumeric characters, spaces, and some common punctuation
+					for _, r := range voice {
+						if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r == ' ' || r == '(' || r == ')') {
+							result := mcp.NewToolResultText(fmt.Sprintf("Error: Voice contains invalid characters: %s", voice))
+							result.IsError = true
+							return result, nil
+						}
+					}
 					args = append(args, "--voice", voice)
+				}
+
+				// Text is passed as a separate argument, not through shell, which provides some safety
+				// but we'll still do basic validation
+				if text == "" {
+					result := mcp.NewToolResultText("Error: Empty text provided")
+					result.IsError = true
+					return result, nil
+				}
+
+				// Check for potentially dangerous shell metacharacters
+				// Note: exec.Command with separate arguments is already safe from command injection,
+				// but we're adding this check as an additional safeguard
+				dangerousChars := []rune{';', '&', '|', '<', '>', '`', '$', '(', ')', '{', '}', '[', ']', '\\', '\'', '"', '\n', '\r'}
+				for _, char := range dangerousChars {
+					if bytes.ContainsRune([]byte(text), char) {
+						log.Warn("Potentially dangerous character in text input",
+							"char", string(char),
+							"text", text)
+					}
 				}
 
 				// Add the text as the last argument
@@ -154,9 +183,6 @@ Designed to be used with the MCP protocol.`,
 				mcp.Required(),
 				mcp.Description("The text to be spoken"),
 			),
-			mcp.WithString("voice",
-				mcp.Description("The voice to use for speech"),
-			),
 		)
 
 		s.AddTool(elevenLabsTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -168,8 +194,8 @@ Designed to be used with the MCP protocol.`,
 				return result, nil
 			}
 
-			voiceID, ok := request.Params.Arguments["voice"].(string)
-			if !ok {
+			voiceID := os.Getenv("ELEVENLABS_VOICE_ID")
+			if voiceID == "" {
 				voiceID = "1SM7GgM6IMuvQlz2BwM3"
 				log.Debug("Voice not specified, using default", "voiceID", voiceID)
 			}
