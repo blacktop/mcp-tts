@@ -8,7 +8,7 @@ require (
 	github.com/gopxl/beep/v2 v2.1.1
 	github.com/mark3labs/mcp-go v0.16.0
 	github.com/spf13/cobra v1.9.1
-	golang.org/x/sync v0.12.0
+	golang.org/x/sync v0.13.0
 )
 
 require (
