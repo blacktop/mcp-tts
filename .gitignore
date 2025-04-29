@@ -28,3 +28,4 @@ go.work.sum
 dist/
 .DS_Store
 completions/
+mcp-say

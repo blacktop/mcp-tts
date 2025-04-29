@@ -25,14 +25,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"time"
 
+	"github.com/caarlos0/ctrlc"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/log"
 	"github.com/gopxl/beep/v2"
@@ -88,7 +91,60 @@ Designed to be used with the MCP protocol.`,
 		s := server.NewMCPServer(
 			"Say TTS Service",
 			Version,
+			server.WithPromptCapabilities(true),
 		)
+
+		s.AddPrompt(mcp.NewPrompt("say",
+			mcp.WithPromptDescription("Speaks the provided text out loud using the macOS text-to-speech engine"),
+			mcp.WithArgument("text",
+				mcp.RequiredArgument(),
+				mcp.ArgumentDescription("The text to be spoken"),
+			),
+			mcp.WithArgument("rate",
+				mcp.ArgumentDescription("The rate at which the text is spoken (words per minute)"),
+			),
+			mcp.WithArgument("voice",
+				mcp.ArgumentDescription("The voice to use for speech"),
+			),
+		), func(ctx context.Context, request mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+			text := request.Params.Arguments["text"]
+			if text == "" {
+				return nil, fmt.Errorf("text is required")
+			}
+
+			args := []string{}
+
+			// Add rate if provided
+			if rate := request.Params.Arguments["rate"]; rate != "" {
+				rateInt, _ := strconv.Atoi(rate)
+				args = append(args, "--rate", fmt.Sprintf("%d", rateInt))
+			} else {
+				args = append(args, "--rate", "200") // Default rate
+			}
+
+			// Add voice if provided
+			if voice := request.Params.Arguments["voice"]; voice != "" {
+				args = append(args, "--voice", voice)
+			}
+
+			args = append(args, text)
+
+			// Execute the say command
+			sayCmd := exec.Command("/usr/bin/say", args...)
+			if err := sayCmd.Start(); err != nil {
+				return nil, fmt.Errorf("failed to start say command: %v", err)
+			}
+
+			return mcp.NewGetPromptResult(
+				"Speaking text",
+				[]mcp.PromptMessage{
+					mcp.NewPromptMessage(
+						mcp.RoleUser,
+						mcp.NewTextContent(fmt.Sprintf("Speaking: %s", text)),
+					),
+				},
+			), nil
+		})
 
 		if runtime.GOOS == "darwin" {
 			// Add the "say" tool
@@ -317,7 +373,23 @@ Designed to be used with the MCP protocol.`,
 
 		log.Info("Starting MCP server", "name", "Say TTS Service", "version", Version)
 		// Start the server using stdin/stdout
-		return server.ServeStdio(s)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		if err := ctrlc.Default.Run(ctx, func() error {
+			if err := server.ServeStdio(s); err != nil {
+				return fmt.Errorf("failed to serve MCP: %v", err)
+			}
+			return nil
+		}); err != nil {
+			if errors.As(err, &ctrlc.ErrorCtrlC{}) {
+				log.Warn("Exiting...")
+				os.Exit(0)
+			} else {
+				return fmt.Errorf("failed while serving MCP: %v", err)
+			}
+		}
+		return nil
 	},
 }
 
