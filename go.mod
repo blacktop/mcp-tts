@@ -7,7 +7,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/log v0.4.1
 	github.com/gopxl/beep/v2 v2.1.1
-	github.com/mark3labs/mcp-go v0.23.1
+	github.com/mark3labs/mcp-go v0.25.0
 	github.com/spf13/cobra v1.9.1
 	golang.org/x/sync v0.13.0
 )
