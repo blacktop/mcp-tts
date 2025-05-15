@@ -1,1 +1,1 @@
-{"jsonrpc":"2.0","id":4,"params":{"name":"elevenlabs","arguments":{"text":"Hello, world!"}},"method":"tools/call"}
+{"jsonrpc":"2.0","id":4,"params":{"name":"elevenlabs","arguments":{"text":"Hello, world! Wanna hear a joke? Knock knock... to get to the other side. ha HA!"}},"method":"tools/call"}

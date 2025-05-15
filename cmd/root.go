@@ -256,6 +256,12 @@ Designed to be used with the MCP protocol.`,
 				log.Debug("Voice not specified, using default", "voiceID", voiceID)
 			}
 
+			modelID := os.Getenv("ELEVENLABS_MODEL_ID")
+			if modelID == "" {
+				modelID = "eleven_multilingual_v2" // eleven_turbo_v2_5 is also available
+				log.Debug("Model not specified, using default", "modelID", modelID)
+			}
+
 			apiKey := os.Getenv("ELEVENLABS_API_KEY")
 			if apiKey == "" {
 				log.Error("ELEVENLABS_API_KEY not set")
@@ -271,16 +277,15 @@ Designed to be used with the MCP protocol.`,
 			g.Go(func() error {
 				defer pipeWriter.Close()
 
-				url := fmt.Sprintf("https://api.elevenlabs.io/v1/text-to-speech/%s", voiceID)
+				url := fmt.Sprintf("https://api.elevenlabs.io/v1/text-to-speech/%s/stream", voiceID)
 
 				params := ElevenLabsParams{
 					Text:    text,
-					ModelID: "eleven_turbo_v2_5",
-					Stream:  true,
+					ModelID: modelID,
 					VoiceSettings: SynthesisOptions{
-						Stability:       0.75,
+						Stability:       0.60,
 						SimilarityBoost: 0.75,
-						Style:           0.0,
+						Style:           0.50,
 						UseSpeakerBoost: false,
 					},
 				}
@@ -294,6 +299,7 @@ Designed to be used with the MCP protocol.`,
 				log.Debug("Making ElevenLabs API request",
 					"url", url,
 					"voice", voiceID,
+					"model", modelID,
 					"text", text,
 					"params", params,
 				)

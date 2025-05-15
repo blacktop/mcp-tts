@@ -63,7 +63,8 @@ Flags:
     "say": {
       "command": "mcp-say",
       "env": {
-        "ELEVENLABS_API_KEY": "********"
+        "ELEVENLABS_API_KEY": "********",
+        "ELEVENLABS_VOICE_ID": "1SM7GgM6IMuvQlz2BwM3"
       }
     }
   }
