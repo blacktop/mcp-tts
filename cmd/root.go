@@ -165,7 +165,8 @@ Designed to be used with the MCP protocol.`,
 			// Add the say tool handler
 			s.AddTool(sayTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				log.Debug("Say tool called", "request", request)
-				text, ok := request.Params.Arguments["text"].(string)
+				arguments := request.GetArguments()
+				text, ok := arguments["text"].(string)
 				if !ok {
 					result := mcp.NewToolResultText("Error: text must be a string")
 					result.IsError = true
@@ -175,14 +176,14 @@ Designed to be used with the MCP protocol.`,
 				args := []string{}
 
 				// Add rate if provided
-				if rate, ok := request.Params.Arguments["rate"].(float64); ok {
+				if rate, ok := arguments["rate"].(float64); ok {
 					args = append(args, "--rate", fmt.Sprintf("%d", int(rate)))
 				} else {
 					args = append(args, "--rate", "200") // Default rate
 				}
 
 				// Add voice if provided and validate it
-				if voice, ok := request.Params.Arguments["voice"].(string); ok && voice != "" {
+				if voice, ok := arguments["voice"].(string); ok && voice != "" {
 					// Simple validation to prevent command injection
 					// Only allow alphanumeric characters, spaces, and some common punctuation
 					for _, r := range voice {
@@ -243,7 +244,8 @@ Designed to be used with the MCP protocol.`,
 
 		s.AddTool(elevenLabsTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			log.Debug("ElevenLabs tool called", "request", request)
-			text, ok := request.Params.Arguments["text"].(string)
+			arguments := request.GetArguments()
+			text, ok := arguments["text"].(string)
 			if !ok {
 				result := mcp.NewToolResultText("Error: text must be a string")
 				result.IsError = true
