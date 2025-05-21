@@ -92,6 +92,8 @@ Designed to be used with the MCP protocol.`,
 			"Say TTS Service",
 			Version,
 			server.WithPromptCapabilities(true),
+			server.WithToolCapabilities(true),
+			server.WithLogging(),
 		)
 
 		s.AddPrompt(mcp.NewPrompt("say",
