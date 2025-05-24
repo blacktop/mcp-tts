@@ -55,6 +55,8 @@ var (
 	logger  *log.Logger
 	// Version stores the service's version
 	Version string
+	// Global cancellation manager
+	cancellationManager *CancellationManager
 )
 
 func init() {
@@ -97,6 +99,16 @@ Designed to be used with the MCP (Model Context Protocol).`,
 		if verbose {
 			log.SetLevel(log.DebugLevel)
 		}
+
+		// Initialize cancellation manager
+		cancellationManager = NewCancellationManager()
+
+		// Ensure proper shutdown of cancellation manager
+		defer func() {
+			if cancellationManager != nil {
+				cancellationManager.Shutdown()
+			}
+		}()
 
 		// Create a new MCP server
 		s := server.NewMCPServer(
@@ -176,7 +188,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			)
 
 			// Add the say tool handler
-			s.AddTool(sayTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			s.AddTool(sayTool, WithCancellation(func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				log.Debug("Say tool called", "request", request)
 				arguments := request.GetArguments()
 				text, ok := arguments["text"].(string)
@@ -233,8 +245,8 @@ Designed to be used with the MCP (Model Context Protocol).`,
 				args = append(args, text)
 
 				log.Debug("Executing say command", "args", args)
-				// Execute the say command
-				sayCmd := exec.Command("/usr/bin/say", args...)
+				// Execute the say command with context for cancellation
+				sayCmd := exec.CommandContext(ctx, "/usr/bin/say", args...)
 				if err := sayCmd.Start(); err != nil {
 					log.Error("Failed to start say command", "error", err)
 					result := mcp.NewToolResultText(fmt.Sprintf("Error: Failed to start say command: %v", err))
@@ -242,9 +254,32 @@ Designed to be used with the MCP (Model Context Protocol).`,
 					return result, nil
 				}
 
-				log.Info("Speaking text", "text", text)
-				return mcp.NewToolResultText(fmt.Sprintf("Speaking: %s", text)), nil
-			})
+				// Wait for command completion or cancellation in a goroutine
+				done := make(chan error, 1)
+				go func() {
+					done <- sayCmd.Wait()
+				}()
+
+				select {
+				case err := <-done:
+					if err != nil {
+						if ctx.Err() == context.Canceled {
+							log.Info("Say command cancelled by user")
+							return mcp.NewToolResultText("Say command cancelled"), nil
+						}
+						log.Error("Say command failed", "error", err)
+						result := mcp.NewToolResultText(fmt.Sprintf("Error: Say command failed: %v", err))
+						result.IsError = true
+						return result, nil
+					}
+					log.Info("Speaking text completed", "text", text)
+					return mcp.NewToolResultText(fmt.Sprintf("Speaking: %s", text)), nil
+				case <-ctx.Done():
+					log.Info("Say command cancelled by user")
+					// The CommandContext will handle killing the process
+					return mcp.NewToolResultText("Say command cancelled"), nil
+				}
+			}))
 		}
 
 		elevenLabsTool := mcp.NewTool("elevenlabs_tts",
@@ -255,7 +290,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			),
 		)
 
-		s.AddTool(elevenLabsTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		s.AddTool(elevenLabsTool, WithCancellation(func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			log.Debug("ElevenLabs tool called", "request", request)
 			arguments := request.GetArguments()
 			text, ok := arguments["text"].(string)
@@ -289,6 +324,8 @@ Designed to be used with the MCP (Model Context Protocol).`,
 
 			// Channel to signal when HTTP response status has been validated
 			statusValidated := make(chan error, 1)
+			// Channel to signal when audio playback is complete
+			audioComplete := make(chan error, 1)
 
 			g, ctx := errgroup.WithContext(ctx)
 
@@ -382,29 +419,66 @@ Designed to be used with the MCP (Model Context Protocol).`,
 				return result, nil
 			}
 
-			log.Debug("Decoding MP3 stream")
-			streamer, format, err := mp3.Decode(pipeReader)
-			if err != nil {
-				log.Error("Failed to decode response", "error", err)
-				result := mcp.NewToolResultText(fmt.Sprintf("Error: Failed to decode response: %v", err))
-				result.IsError = true
-				return result, nil
+			// Start audio playback in a separate goroutine with cancellation support
+			g.Go(func() error {
+				log.Debug("Decoding MP3 stream")
+				streamer, format, err := mp3.Decode(pipeReader)
+				if err != nil {
+					log.Error("Failed to decode response", "error", err)
+					audioComplete <- fmt.Errorf("failed to decode response: %v", err)
+					return fmt.Errorf("failed to decode response: %v", err)
+				}
+				defer streamer.Close()
+
+				log.Debug("Initializing speaker", "sampleRate", format.SampleRate)
+				speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10))
+				done := make(chan bool, 1)
+
+				// Play audio with callback
+				speaker.Play(beep.Seq(streamer, beep.Callback(func() {
+					done <- true
+				})))
+
+				log.Info("Speaking text via ElevenLabs", "text", text)
+
+				// Wait for either completion or cancellation
+				select {
+				case <-done:
+					log.Debug("Audio playback completed normally")
+					audioComplete <- nil
+					return nil
+				case <-ctx.Done():
+					log.Debug("Context cancelled, stopping audio playback")
+					// Clear all audio from speaker to stop playback immediately
+					speaker.Clear()
+					audioComplete <- ctx.Err()
+					return ctx.Err()
+				}
+			})
+
+			// Wait for audio completion or cancellation
+			select {
+			case err := <-audioComplete:
+				if err != nil && err != context.Canceled {
+					log.Error("Audio playback failed", "error", err)
+					result := mcp.NewToolResultText(fmt.Sprintf("Error: %v", err))
+					result.IsError = true
+					return result, nil
+				}
+				if err == context.Canceled {
+					log.Info("Audio playback cancelled by user")
+					return mcp.NewToolResultText("Audio playback cancelled"), nil
+				}
+			case <-ctx.Done():
+				log.Info("Request cancelled, stopping all operations")
+				speaker.Clear()
+				return mcp.NewToolResultText("Request cancelled"), nil
 			}
-			defer streamer.Close()
 
-			log.Debug("Initializing speaker", "sampleRate", format.SampleRate)
-			speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10))
-			done := make(chan bool)
-			speaker.Play(beep.Seq(streamer, beep.Callback(func() {
-				done <- true
-			})))
-
-			log.Info("Speaking text via ElevenLabs", "text", text)
-			<-done
 			log.Debug("Finished speaking")
 
 			// Check for any errors that occurred during streaming
-			if err := g.Wait(); err != nil {
+			if err := g.Wait(); err != nil && err != context.Canceled {
 				log.Error("Error occurred during streaming", "error", err)
 				result := mcp.NewToolResultText(fmt.Sprintf("Error: %v", err))
 				result.IsError = true
@@ -412,7 +486,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			}
 
 			return mcp.NewToolResultText(fmt.Sprintf("Speaking: %s", text)), nil
-		})
+		}))
 
 		// Add Google TTS tool
 		googleTTSTool := mcp.NewTool("google_tts",
@@ -429,7 +503,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			),
 		)
 
-		s.AddTool(googleTTSTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		s.AddTool(googleTTSTool, WithCancellation(func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			log.Debug("Google TTS tool called", "request", request)
 			arguments := request.GetArguments()
 			text, ok := arguments["text"].(string)
@@ -537,18 +611,26 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			// Initialize speaker with the sample rate
 			speaker.Init(pcmStream.sampleRate, pcmStream.sampleRate.N(time.Second/10))
 
-			// Play the audio
+			// Play the audio with cancellation support
 			done := make(chan bool)
 			speaker.Play(beep.Seq(pcmStream, beep.Callback(func() {
 				done <- true
 			})))
 
-			// Wait for playback to complete
-			<-done
-
 			log.Info("Speaking via Google TTS", "text", text, "voice", voice, "model", model)
-			return mcp.NewToolResultText(fmt.Sprintf("Speaking: %s (via Google TTS with voice %s)", text, voice)), nil
-		})
+
+			// Wait for either playback completion or cancellation
+			select {
+			case <-done:
+				log.Debug("Google TTS audio playback completed normally")
+				return mcp.NewToolResultText(fmt.Sprintf("Speaking: %s (via Google TTS with voice %s)", text, voice)), nil
+			case <-ctx.Done():
+				log.Debug("Context cancelled, stopping Google TTS audio playback")
+				speaker.Clear()
+				log.Info("Google TTS audio playback cancelled by user")
+				return mcp.NewToolResultText("Google TTS audio playback cancelled"), nil
+			}
+		}))
 
 		// Add OpenAI TTS tool
 		openaiTTSTool := mcp.NewTool("openai_tts",
@@ -571,7 +653,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			),
 		)
 
-		s.AddTool(openaiTTSTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		s.AddTool(openaiTTSTool, WithCancellation(func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			log.Debug("OpenAI TTS tool called", "request", request)
 			arguments := request.GetArguments()
 			text, ok := arguments["text"].(string)
@@ -689,12 +771,19 @@ Designed to be used with the MCP (Model Context Protocol).`,
 				logFields = append(logFields, "instructions", instructions)
 			}
 			log.Info("Speaking text via OpenAI TTS", logFields...)
-			// Wait for playback to complete
-			<-done
-			log.Debug("Finished speaking via OpenAI TTS")
 
-			return mcp.NewToolResultText(fmt.Sprintf("Speaking: %s (via OpenAI TTS with voice %s)", text, voice)), nil
-		})
+			// Wait for either playback completion or cancellation
+			select {
+			case <-done:
+				log.Debug("OpenAI TTS audio playback completed normally")
+				return mcp.NewToolResultText(fmt.Sprintf("Speaking: %s (via OpenAI TTS with voice %s)", text, voice)), nil
+			case <-ctx.Done():
+				log.Debug("Context cancelled, stopping OpenAI TTS audio playback")
+				speaker.Clear()
+				log.Info("OpenAI TTS audio playback cancelled by user")
+				return mcp.NewToolResultText("OpenAI TTS audio playback cancelled"), nil
+			}
+		}))
 
 		log.Info("Starting MCP server", "name", "Say TTS Service", "version", Version)
 		// Start the server using stdin/stdout
