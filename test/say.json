@@ -1,1 +1,1 @@
-{"jsonrpc":"2.0","id":3,"params":{"name":"say","arguments":{"text":"Hello, world!"}},"method":"tools/call"}
+{"jsonrpc":"2.0","id":3,"params":{"name":"say_tts","arguments":{"text":"Hello! This is a test of the macOS say command. You should definitely hear this spoken aloud right now!"}},"method":"tools/call"}

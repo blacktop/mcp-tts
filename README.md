@@ -18,17 +18,28 @@
 
 Adds Text-to-Speech to things like Claude Desktop and Cursor IDE.  
 
-It registers two tools: 
- - `say` 
- - `elevenlabs`
+It registers three TTS tools: 
+ - `say_tts` 
+ - `elevenlabs_tts`
+ - `google_tts`
 
-### `say`
+### `say_tts`
 
-Uses the macOS `say` binary to speak the text
+Uses the macOS `say` binary to speak the text with built-in system voices
 
-### `elevenlabs`
+### `elevenlabs_tts`
 
-Uses the [elevenlabs](https://elevenlabs.io/app/speech-synthesis/text-to-speech) text-to-speech API to speak the text
+Uses the [ElevenLabs](https://elevenlabs.io/app/speech-synthesis/text-to-speech) text-to-speech API to speak the text with premium AI voices
+
+### `google_tts`
+
+Uses Google's [Gemini TTS models](https://ai.google.dev/gemini-api/docs/speech-generation) to speak the text with 30 high-quality voices. Available voices include:
+
+- **Zephyr** (Bright), **Puck** (Upbeat), **Charon** (Informative)  
+- **Kore** (Firm), **Fenrir** (Excitable), **Leda** (Youthful)
+- **Orus** (Firm), **Aoede** (Breezy), **Callirhoe** (Easy-going)
+- **Autonoe** (Bright), **Enceladus** (Breathy), **Iapetus** (Clear)
+- And 18 more voices with various characteristics
 
 ## Getting Started
 
@@ -64,25 +75,47 @@ Flags:
       "command": "mcp-say",
       "env": {
         "ELEVENLABS_API_KEY": "********",
-        "ELEVENLABS_VOICE_ID": "1SM7GgM6IMuvQlz2BwM3"
+        "ELEVENLABS_VOICE_ID": "1SM7GgM6IMuvQlz2BwM3",
+        "GOOGLE_AI_API_KEY": "********"
       }
     }
   }
 }
 ```
 
+#### Environment Variables
+
+- `ELEVENLABS_API_KEY`: Your ElevenLabs API key (required for `elevenlabs_tts`)
+- `ELEVENLABS_VOICE_ID`: ElevenLabs voice ID (optional, defaults to a built-in voice)
+- `GOOGLE_AI_API_KEY` or `GEMINI_API_KEY`: Your Google AI API key (required for `google_tts`)
+
 ### Test
 
+#### Test macOS TTS
 ```bash
 ❱ cat test/say.json | go run main.go --verbose
 
 2025/03/23 22:41:49 INFO Starting MCP server name="Say TTS Service" version=1.0.0
-2025/03/23 22:41:49 DEBU Say tool called request="{Request:{Method:tools/call Params:{Meta:<nil>}} Params:{Name:say Arguments:map[text:Hello, world!] Meta:<nil>}}"
+2025/03/23 22:41:49 DEBU Say tool called request="{Request:{Method:tools/call Params:{Meta:<nil>}} Params:{Name:say_tts Arguments:map[text:Hello, world!] Meta:<nil>}}"
 2025/03/23 22:41:49 DEBU Executing say command args="[--rate 200 Hello, world!]"
 2025/03/23 22:41:49 INFO Speaking text text="Hello, world!"
 ```
 ```json
 {"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"Speaking: Hello, world!"}]}}
+```
+
+#### Test Google TTS
+```bash
+❱ cat test/google_tts.json | go run main.go --verbose
+
+2025/05/23 18:26:45 INFO Starting MCP server name="Say TTS Service" version=""
+2025/05/23 18:26:45 DEBU Google TTS tool called request="{...}"
+2025/05/23 18:26:45 DEBU Generating TTS audio model=gemini-2.5-flash-preview-tts voice=Kore text="Hello! This is a test of Google's TTS API. How does it sound?"
+2025/05/23 18:26:49 INFO Playing TTS audio via beep speaker bytes=181006
+2025/05/23 18:26:53 INFO Speaking via Google TTS text="Hello! This is a test of Google's TTS API. How does it sound?" voice=Kore
+```
+```json
+{"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"Speaking: Hello! This is a test of Google's TTS API. How does it sound? (via Google TTS with voice Kore)"}]}}
 ```
 
 

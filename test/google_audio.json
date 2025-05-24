@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{"tools":{},"sampling":{}},"clientInfo":{"name":"test-client","version":"1.0.0"}}}
+{"jsonrpc":"2.0","id":2,"method":"notifications/initialized"}
+{"jsonrpc":"2.0","id":3,"method":"tools/list"}
+{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"google_tts","arguments":{"text":"Hello! This is a test of Google's Live API with audio output. You should hear this spoken aloud!","mode":"audio","voice":"Kore","language":"en-US"}}} 

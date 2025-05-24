@@ -45,6 +45,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/genai"
 )
 
 var (
@@ -149,8 +150,8 @@ Designed to be used with the MCP protocol.`,
 		})
 
 		if runtime.GOOS == "darwin" {
-			// Add the "say" tool
-			sayTool := mcp.NewTool("say",
+			// Add the "say_tts" tool
+			sayTool := mcp.NewTool("say_tts",
 				mcp.WithDescription("Speaks the provided text out loud using the macOS text-to-speech engine"),
 				mcp.WithString("text",
 					mcp.Required(),
@@ -236,7 +237,7 @@ Designed to be used with the MCP protocol.`,
 			})
 		}
 
-		elevenLabsTool := mcp.NewTool("elevenlabs",
+		elevenLabsTool := mcp.NewTool("elevenlabs_tts",
 			mcp.WithDescription("Uses the ElevenLabs API to generate speech from text"),
 			mcp.WithString("text",
 				mcp.Required(),
@@ -276,6 +277,9 @@ Designed to be used with the MCP protocol.`,
 
 			pipeReader, pipeWriter := io.Pipe()
 
+			// Channel to signal when HTTP response status has been validated
+			statusValidated := make(chan error, 1)
+
 			g, ctx := errgroup.WithContext(ctx)
 
 			g.Go(func() error {
@@ -297,6 +301,7 @@ Designed to be used with the MCP protocol.`,
 				b, err := json.Marshal(params)
 				if err != nil {
 					log.Error("Failed to marshal request body", "error", err)
+					statusValidated <- fmt.Errorf("failed to marshal request body: %v", err)
 					return fmt.Errorf("failed to marshal request body: %v", err)
 				}
 
@@ -311,6 +316,7 @@ Designed to be used with the MCP protocol.`,
 				req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(b))
 				if err != nil {
 					log.Error("Failed to create request", "error", err)
+					statusValidated <- fmt.Errorf("failed to create request: %v", err)
 					return fmt.Errorf("failed to create request: %v", err)
 				}
 
@@ -322,14 +328,26 @@ Designed to be used with the MCP protocol.`,
 				res, err := http.DefaultClient.Do(req)
 				if err != nil {
 					log.Error("Failed to send request", "error", err)
+					statusValidated <- fmt.Errorf("failed to send request: %v", err)
 					return fmt.Errorf("failed to send request: %v", err)
 				}
 				defer res.Body.Close()
 
 				if res.StatusCode != http.StatusOK {
-					log.Error("Request failed", "status", res.Status)
-					return fmt.Errorf("failed to send request: %v", res.Status)
+					log.Error("Request failed", "status", res.Status, "statusCode", res.StatusCode)
+					// Read the error response body for more details
+					body, readErr := io.ReadAll(res.Body)
+					errMsg := fmt.Errorf("ElevenLabs API error: status %d %s", res.StatusCode, res.Status)
+					if readErr == nil && len(body) > 0 {
+						log.Error("Error response body", "body", string(body))
+						errMsg = fmt.Errorf("ElevenLabs API error (status %d): %s", res.StatusCode, string(body))
+					}
+					statusValidated <- errMsg
+					return errMsg
 				}
+
+				// HTTP status is OK, signal success and proceed with streaming
+				statusValidated <- nil
 
 				log.Debug("Copying response body to pipe")
 				bytesWritten, err := io.Copy(pipeWriter, res.Body)
@@ -337,24 +355,21 @@ Designed to be used with the MCP protocol.`,
 				return err
 			})
 
-			// Start a goroutine to check for any errors from the errgroup
-			errCh := make(chan error, 1)
-			go func() {
-				errCh <- g.Wait()
-			}()
-
-			// Check for any immediate errors before proceeding
+			// Wait for HTTP status validation before proceeding to decode
 			select {
-			case err := <-errCh:
+			case err := <-statusValidated:
 				if err != nil {
-					log.Error("Error from goroutine", "error", err)
+					log.Error("HTTP request failed", "error", err)
 					result := mcp.NewToolResultText(fmt.Sprintf("Error: %v", err))
 					result.IsError = true
 					return result, nil
 				}
-			case <-time.After(100 * time.Millisecond):
-				log.Debug("No immediate error from goroutine, continuing")
-				// Continue if no immediate error
+				log.Debug("HTTP status validated successfully, proceeding to decode")
+			case <-ctx.Done():
+				log.Error("Context cancelled while waiting for HTTP status validation")
+				result := mcp.NewToolResultText("Error: Request cancelled")
+				result.IsError = true
+				return result, nil
 			}
 
 			log.Debug("Decoding MP3 stream")
@@ -378,7 +393,151 @@ Designed to be used with the MCP protocol.`,
 			<-done
 			log.Debug("Finished speaking")
 
+			// Check for any errors that occurred during streaming
+			if err := g.Wait(); err != nil {
+				log.Error("Error occurred during streaming", "error", err)
+				result := mcp.NewToolResultText(fmt.Sprintf("Error: %v", err))
+				result.IsError = true
+				return result, nil
+			}
+
 			return mcp.NewToolResultText(fmt.Sprintf("Speaking: %s", text)), nil
+		})
+
+		// Add Google TTS tool
+		googleTTSTool := mcp.NewTool("google_tts",
+			mcp.WithDescription("Uses Google's dedicated Text-to-Speech API with Gemini TTS models"),
+			mcp.WithString("text",
+				mcp.Required(),
+				mcp.Description("The text message to convert to speech"),
+			),
+			mcp.WithString("voice",
+				mcp.Description("Voice name: Zephyr, Puck, Charon, Kore, Fenrir, Aoede, Leda, Orus, etc. (default: Kore)"),
+			),
+			mcp.WithString("model",
+				mcp.Description("TTS model: gemini-2.5-flash-preview-tts, gemini-2.5-pro-preview-tts (default: gemini-2.5-flash-preview-tts)"),
+			),
+		)
+
+		s.AddTool(googleTTSTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			log.Debug("Google TTS tool called", "request", request)
+			arguments := request.GetArguments()
+			text, ok := arguments["text"].(string)
+			if !ok {
+				result := mcp.NewToolResultText("Error: text must be a string")
+				result.IsError = true
+				return result, nil
+			}
+
+			if text == "" {
+				result := mcp.NewToolResultText("Error: Empty text provided")
+				result.IsError = true
+				return result, nil
+			}
+
+			// Get configuration from arguments
+			voice := "Kore"
+			if v, ok := arguments["voice"].(string); ok && v != "" {
+				voice = v
+			}
+
+			model := "gemini-2.5-flash-preview-tts"
+			if m, ok := arguments["model"].(string); ok && m != "" {
+				model = m
+			}
+
+			// Get API key from environment
+			apiKey := os.Getenv("GOOGLE_AI_API_KEY")
+			if apiKey == "" {
+				apiKey = os.Getenv("GEMINI_API_KEY")
+			}
+			if apiKey == "" {
+				log.Error("GOOGLE_AI_API_KEY or GEMINI_API_KEY not set")
+				result := mcp.NewToolResultText("Error: GOOGLE_AI_API_KEY or GEMINI_API_KEY is not set")
+				result.IsError = true
+				return result, nil
+			}
+
+			// Create Google AI client
+			client, err := genai.NewClient(ctx, &genai.ClientConfig{
+				APIKey:  apiKey,
+				Backend: genai.BackendGeminiAPI,
+			})
+			if err != nil {
+				log.Error("Failed to create Google AI client", "error", err)
+				result := mcp.NewToolResultText(fmt.Sprintf("Error: Failed to create client: %v", err))
+				result.IsError = true
+				return result, nil
+			}
+
+			log.Debug("Generating TTS audio",
+				"model", model,
+				"voice", voice,
+				"text", text,
+			)
+
+			// Generate TTS audio using the dedicated TTS models
+			content := []*genai.Content{
+				genai.NewContentFromText(text, genai.RoleUser),
+			}
+
+			response, err := client.Models.GenerateContent(ctx, model, content, &genai.GenerateContentConfig{
+				ResponseModalities: []string{"AUDIO"},
+				SpeechConfig: &genai.SpeechConfig{
+					VoiceConfig: &genai.VoiceConfig{
+						PrebuiltVoiceConfig: &genai.PrebuiltVoiceConfig{
+							VoiceName: voice,
+						},
+					},
+				},
+			})
+			if err != nil {
+				log.Error("Failed to generate TTS audio", "error", err)
+				result := mcp.NewToolResultText(fmt.Sprintf("Error: Failed to generate TTS audio: %v", err))
+				result.IsError = true
+				return result, nil
+			}
+
+			// Extract audio data from response
+			if len(response.Candidates) == 0 || len(response.Candidates[0].Content.Parts) == 0 {
+				log.Error("No audio data in TTS response")
+				result := mcp.NewToolResultText("Error: No audio data received from Google TTS")
+				result.IsError = true
+				return result, nil
+			}
+
+			part := response.Candidates[0].Content.Parts[0]
+			if part.InlineData == nil {
+				log.Error("No inline data in TTS response")
+				result := mcp.NewToolResultText("Error: No audio data received from Google TTS")
+				result.IsError = true
+				return result, nil
+			}
+
+			audioData := part.InlineData.Data
+			log.Info("Playing TTS audio via beep speaker", "bytes", len(audioData))
+
+			// Create PCM stream for beep (Google TTS returns 24kHz PCM)
+			pcmStream := &PCMStream{
+				data:       audioData,
+				sampleRate: beep.SampleRate(24000), // 24kHz sample rate from Google TTS
+				position:   0,
+			}
+
+			// Initialize speaker with the sample rate
+			speaker.Init(pcmStream.sampleRate, pcmStream.sampleRate.N(time.Second/10))
+
+			// Play the audio
+			done := make(chan bool)
+			speaker.Play(beep.Seq(pcmStream, beep.Callback(func() {
+				done <- true
+			})))
+
+			// Wait for playback to complete
+			<-done
+
+			log.Info("Speaking via Google TTS", "text", text, "voice", voice, "model", model)
+			return mcp.NewToolResultText(fmt.Sprintf("Speaking: %s (via Google TTS with voice %s)", text, voice)), nil
 		})
 
 		log.Info("Starting MCP server", "name", "Say TTS Service", "version", Version)
