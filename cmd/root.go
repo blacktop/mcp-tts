@@ -77,13 +77,21 @@ func init() {
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "mcp-say",
+	Use:   "mcp-tts",
 	Short: "TTS (text-to-speech) MCP Server",
 	Long: `TTS (text-to-speech) MCP Server.
 
-Provides a text-to-speech service using the MacOS 'say' command.
+Provides multiple text-to-speech services via MCP protocol:
 
-Designed to be used with the MCP protocol.`,
+• say_tts - Uses macOS built-in 'say' command (macOS only)
+• elevenlabs_tts - Uses ElevenLabs API for high-quality speech synthesis
+• google_tts - Uses Google's Gemini TTS models for natural speech
+• openai_tts - Uses OpenAI's TTS API with various voice options
+
+Each tool supports different voices, rates, and configuration options.
+Requires appropriate API keys for cloud-based services.
+
+Designed to be used with the MCP (Model Context Protocol).`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if verbose {

@@ -1,6 +1,6 @@
 # Google TTS Tests Documentation
 
-This directory contains comprehensive unit tests for the Google TTS (Text-to-Speech) integration in the mcp-say TTS service.
+This directory contains comprehensive unit tests for the Google TTS (Text-to-Speech) integration in the mcp-tts TTS service.
 
 ## Test Files
 

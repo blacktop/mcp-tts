@@ -21,7 +21,7 @@ THE SOFTWARE.
 */
 package main
 
-import "github.com/blacktop/mcp-say/cmd"
+import "github.com/blacktop/mcp-tts/cmd"
 
 func main() {
 	cmd.Execute()

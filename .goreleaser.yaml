@@ -18,7 +18,7 @@ before:
 
 builds:
   - id: default
-    binary: mcp-say
+    binary: mcp-tts
     env:
       - CGO_ENABLED=0
     goos:
@@ -28,7 +28,7 @@ builds:
     mod_timestamp: "{{ .CommitTimestamp }}"
     flags:
       - -trimpath
-    ldflags: -s -w -X github.com/blacktop/mcp-say/cmd.Version={{.Version}}
+    ldflags: -s -w -X github.com/blacktop/mcp-tts/cmd.Version={{.Version}}
 
 universal_binaries:
   - replace: false
@@ -58,16 +58,16 @@ brews:
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Formula
     goarm: "7"
-    homepage: https://github.com/blacktop/mcp-say
-    description: mcp-say
+    homepage: https://github.com/blacktop/mcp-tts
+    description: mcp-tts
     license: MIT
     install: |
-      bin.install "mcp-say"
-      bash_completion.install "completions/_bash" => "mcp-say"
-      zsh_completion.install "completions/_zsh" => "_mcp-say"
-      fish_completion.install "completions/_fish" => "mcp-say.fish"
+      bin.install "mcp-tts"
+      bash_completion.install "completions/_bash" => "mcp-tts"
+      zsh_completion.install "completions/_zsh" => "_mcp-tts"
+      fish_completion.install "completions/_fish" => "mcp-tts.fish"
     test: |
-      system "#{bin}/mcp-say --help"
+      system "#{bin}/mcp-tts --help"
 
 changelog:
   sort: asc
@@ -104,7 +104,7 @@ changelog:
 release:
   footer: |
     ### Summary
-    **Full Changelog**: https://github.com/blacktop/mcp-say/compare/{{ .PreviousTag }}...{{ .Tag }}
+    **Full Changelog**: https://github.com/blacktop/mcp-tts/compare/{{ .PreviousTag }}...{{ .Tag }}
     ## What to do next?
     - Follow us on [Twitter](https://twitter.com/blacktop__)
     - Follow us on [Mastodon](https://mastodon.social/@blacktop)

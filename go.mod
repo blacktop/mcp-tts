@@ -1,4 +1,4 @@
-module github.com/blacktop/mcp-say
+module github.com/blacktop/mcp-tts
 
 go 1.24
 

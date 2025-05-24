@@ -1,14 +1,14 @@
 <p align="center">
-  <a href="https://github.com/blacktop/mcp-say"><img alt="mcp-say Logo" src="https://raw.githubusercontent.com/blacktop/mcp-say/main/docs/logo.webp" height="200" /></a>
+  <a href="https://github.com/blacktop/mcp-tts"><img alt="mcp-tts Logo" src="https://raw.githubusercontent.com/blacktop/mcp-tts/main/docs/logo.webp" height="200" /></a>
   <h1 align="center">mcp-tts</h1>
   <h4><p align="center">MCP Server for TTS (Text-to-Speech)</p></h4>
   <p align="center">
-    <a href="https://github.com/blacktop/mcp-say/actions" alt="Actions">
-          <img src="https://github.com/blacktop/mcp-say/actions/workflows/go.yml/badge.svg" /></a>
-    <a href="https://github.com/blacktop/mcp-say/releases/latest" alt="Downloads">
-          <img src="https://img.shields.io/github/downloads/blacktop/mcp-say/total.svg" /></a>
-    <a href="https://github.com/blacktop/mcp-say/releases" alt="GitHub Release">
-          <img src="https://img.shields.io/github/release/blacktop/mcp-say.svg" /></a>
+    <a href="https://github.com/blacktop/mcp-tts/actions" alt="Actions">
+          <img src="https://github.com/blacktop/mcp-tts/actions/workflows/go.yml/badge.svg" /></a>
+    <a href="https://github.com/blacktop/mcp-tts/releases/latest" alt="Downloads">
+          <img src="https://img.shields.io/github/downloads/blacktop/mcp-tts/total.svg" /></a>
+    <a href="https://github.com/blacktop/mcp-tts/releases" alt="GitHub Release">
+          <img src="https://img.shields.io/github/release/blacktop/mcp-tts.svg" /></a>
     <a href="http://doge.mit-license.org" alt="LICENSE">
           <img src="https://img.shields.io/:license-mit-blue.svg" /></a>
 </p>
@@ -68,11 +68,11 @@ Additional features:
 ### Install
 
 ```bash
-go install github.com/blacktop/mcp-say@latest
+go install github.com/blacktop/mcp-tts@latest
 ```
 
 ```bash
-❱ mcp-say --help
+❱ mcp-tts --help
 
 TTS (text-to-speech) MCP Server.
 
@@ -81,10 +81,10 @@ Provides a text-to-speech service using the MacOS 'say' command.
 Designed to be used with the MCP protocol.
 
 Usage:
-  mcp-say [flags]
+  mcp-tts [flags]
 
 Flags:
-  -h, --help      help for mcp-say
+  -h, --help      help for mcp-tts
   -v, --verbose   Enable verbose debug logging
 ```
 
@@ -94,7 +94,7 @@ Flags:
 {
   "mcpServers": {
     "say": {
-      "command": "mcp-say",
+      "command": "mcp-tts",
       "env": {
         "ELEVENLABS_API_KEY": "********",
         "ELEVENLABS_VOICE_ID": "1SM7GgM6IMuvQlz2BwM3",

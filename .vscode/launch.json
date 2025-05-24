@@ -12,7 +12,7 @@
             "program": "${workspaceFolder}/test/main.go"
         },
         {
-            "name": "Attach to mcp-say",
+            "name": "Attach to mcp-tts",
             "type": "go",
             "debugAdapter": "dlv-dap",
             "request": "attach",
