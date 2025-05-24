@@ -1,7 +1,7 @@
 <p align="center">
   <a href="https://github.com/blacktop/mcp-say"><img alt="mcp-say Logo" src="https://raw.githubusercontent.com/blacktop/mcp-say/main/docs/logo.webp" height="200" /></a>
   <h1 align="center">mcp-say</h1>
-  <h4><p align="center">TTS (text-to-speech) MCP Server</p></h4>
+  <h4><p align="center">MCP Server for TTS (Text-to-Speech)/p></h4>
   <p align="center">
     <a href="https://github.com/blacktop/mcp-say/actions" alt="Actions">
           <img src="https://github.com/blacktop/mcp-say/actions/workflows/go.yml/badge.svg" /></a>
