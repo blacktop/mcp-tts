@@ -18,10 +18,11 @@
 
 Adds Text-to-Speech to things like Claude Desktop and Cursor IDE.  
 
-It registers three TTS tools: 
+It registers four TTS tools: 
  - `say_tts` 
  - `elevenlabs_tts`
  - `google_tts`
+ - `openai_tts`
 
 ### `say_tts`
 
@@ -40,6 +41,27 @@ Uses Google's [Gemini TTS models](https://ai.google.dev/gemini-api/docs/speech-g
 - **Orus** (Firm), **Aoede** (Breezy), **Callirhoe** (Easy-going)
 - **Autonoe** (Bright), **Enceladus** (Breathy), **Iapetus** (Clear)
 - And 18 more voices with various characteristics
+
+### `openai_tts`
+
+Uses OpenAI's [Text-to-Speech API](https://platform.openai.com/docs/guides/text-to-speech) to speak the text with 6 natural-sounding voices:
+
+- **coral** (Default, warm and natural)
+- **alloy** (Balanced tone)
+- **echo** (Warm and engaging)  
+- **fable** (Expressive and storytelling)
+- **onyx** (Deep and resonant)
+- **nova** (Bright and articulate)
+- **shimmer** (Smooth and pleasant)
+
+Supports three quality models:
+- **gpt-4o-mini-tts** - Default, optimized quality and speed
+- **tts-1** - Standard quality, faster generation  
+- **tts-1-hd** - High definition audio, premium quality
+
+Additional features:
+- Speed control from 0.25x to 4.0x (default: 1.0x)
+- Custom voice instructions (e.g., "Speak in a cheerful and positive tone") via parameter or `OPENAI_TTS_INSTRUCTIONS` environment variable
 
 ## Getting Started
 
@@ -76,7 +98,9 @@ Flags:
       "env": {
         "ELEVENLABS_API_KEY": "********",
         "ELEVENLABS_VOICE_ID": "1SM7GgM6IMuvQlz2BwM3",
-        "GOOGLE_AI_API_KEY": "********"
+        "GOOGLE_AI_API_KEY": "********",
+        "OPENAI_API_KEY": "********",
+        "OPENAI_TTS_INSTRUCTIONS": "Speak in a cheerful and positive tone"
       }
     }
   }
@@ -88,6 +112,8 @@ Flags:
 - `ELEVENLABS_API_KEY`: Your ElevenLabs API key (required for `elevenlabs_tts`)
 - `ELEVENLABS_VOICE_ID`: ElevenLabs voice ID (optional, defaults to a built-in voice)
 - `GOOGLE_AI_API_KEY` or `GEMINI_API_KEY`: Your Google AI API key (required for `google_tts`)
+- `OPENAI_API_KEY`: Your OpenAI API key (required for `openai_tts`)
+- `OPENAI_TTS_INSTRUCTIONS`: Custom voice instructions for OpenAI TTS (optional, e.g., "Speak in a cheerful and positive tone")
 
 ### Test
 
@@ -116,6 +142,21 @@ Flags:
 ```
 ```json
 {"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"Speaking: Hello! This is a test of Google's TTS API. How does it sound? (via Google TTS with voice Kore)"}]}}
+```
+
+#### Test OpenAI TTS
+```bash
+❱ cat test/openai_tts.json | go run main.go --verbose
+
+2025/05/23 19:15:32 INFO Starting MCP server name="Say TTS Service" version=""
+2025/05/23 19:15:32 DEBU OpenAI TTS tool called request="{...}"
+2025/05/23 19:15:32 DEBU Generating OpenAI TTS audio model=tts-1 voice=nova speed=1.2 text="Hello! This is a test of OpenAI's text-to-speech API. I'm using the nova voice at 1.2x speed."
+2025/05/23 19:15:34 DEBU Decoding MP3 stream from OpenAI
+2025/05/23 19:15:34 DEBU Initializing speaker for OpenAI TTS sampleRate=22050
+2025/05/23 19:15:36 INFO Speaking text via OpenAI TTS text="Hello! This is a test of OpenAI's text-to-speech API. I'm using the nova voice at 1.2x speed." voice=nova model=tts-1 speed=1.2
+```
+```json
+{"jsonrpc":"2.0","id":5,"result":{"content":[{"type":"text","text":"Speaking: Hello! This is a test of OpenAI's text-to-speech API. I'm using the nova voice at 1.2x speed. (via OpenAI TTS with voice nova)"}]}}
 ```
 
 

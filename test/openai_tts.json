@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","id":5,"params":{"name":"openai_tts","arguments":{"text":"Hello! This is a test of OpenAI's text-to-speech API. I'm using the nova voice at 1.2x speed.","voice":"nova","speed":1.2}},"method":"tools/call"} 

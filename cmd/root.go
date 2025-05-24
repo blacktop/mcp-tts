@@ -43,6 +43,8 @@ import (
 	"github.com/gopxl/beep/v2/speaker"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/openai/openai-go"
+	"github.com/openai/openai-go/option"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/genai"
@@ -538,6 +540,152 @@ Designed to be used with the MCP protocol.`,
 
 			log.Info("Speaking via Google TTS", "text", text, "voice", voice, "model", model)
 			return mcp.NewToolResultText(fmt.Sprintf("Speaking: %s (via Google TTS with voice %s)", text, voice)), nil
+		})
+
+		// Add OpenAI TTS tool
+		openaiTTSTool := mcp.NewTool("openai_tts",
+			mcp.WithDescription("Uses OpenAI's Text-to-Speech API to generate speech from text"),
+			mcp.WithString("text",
+				mcp.Required(),
+				mcp.Description("The text to be spoken"),
+			),
+			mcp.WithString("voice",
+				mcp.Description("Voice to use: coral, alloy, echo, fable, onyx, nova, shimmer (default: coral)"),
+			),
+			mcp.WithString("model",
+				mcp.Description("TTS model: gpt-4o-mini-tts, tts-1, tts-1-hd (default: gpt-4o-mini-tts)"),
+			),
+			mcp.WithNumber("speed",
+				mcp.Description("Speed of speech from 0.25 to 4.0 (default: 1.0)"),
+			),
+			mcp.WithString("instructions",
+				mcp.Description("Custom voice instructions (e.g., 'Speak in a cheerful and positive tone'). Can be set via OPENAI_TTS_INSTRUCTIONS env var"),
+			),
+		)
+
+		s.AddTool(openaiTTSTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			log.Debug("OpenAI TTS tool called", "request", request)
+			arguments := request.GetArguments()
+			text, ok := arguments["text"].(string)
+			if !ok {
+				result := mcp.NewToolResultText("Error: text must be a string")
+				result.IsError = true
+				return result, nil
+			}
+
+			if text == "" {
+				result := mcp.NewToolResultText("Error: Empty text provided")
+				result.IsError = true
+				return result, nil
+			}
+
+			// Get configuration from arguments
+			voice := "coral"
+			if v, ok := arguments["voice"].(string); ok && v != "" {
+				voice = v
+			}
+
+			model := "gpt-4o-mini-tts"
+			if m, ok := arguments["model"].(string); ok && m != "" {
+				model = m
+			}
+
+			speed := 1.0
+			if s, ok := arguments["speed"].(float64); ok {
+				if s >= 0.25 && s <= 4.0 {
+					speed = s
+				} else {
+					log.Warn("Speed out of range, using default", "provided", s, "default", 1.0)
+				}
+			}
+
+			// Get voice instructions from arguments or environment variable
+			instructions := ""
+			if inst, ok := arguments["instructions"].(string); ok && inst != "" {
+				instructions = inst
+			} else {
+				// Fallback to environment variable
+				instructions = os.Getenv("OPENAI_TTS_INSTRUCTIONS")
+			}
+
+			// Basic validation for instructions length (OpenAI has reasonable limits)
+			if len(instructions) > 1000 {
+				log.Warn("Instructions are very long, may exceed API limits", "length", len(instructions))
+			}
+
+			// Get API key from environment
+			apiKey := os.Getenv("OPENAI_API_KEY")
+			if apiKey == "" {
+				log.Error("OPENAI_API_KEY not set")
+				result := mcp.NewToolResultText("Error: OPENAI_API_KEY is not set")
+				result.IsError = true
+				return result, nil
+			}
+
+			// Create OpenAI client
+			client := openai.NewClient(option.WithAPIKey(apiKey))
+
+			logFields := []any{
+				"model", model,
+				"voice", voice,
+				"speed", speed,
+				"text", text,
+			}
+			if instructions != "" {
+				logFields = append(logFields, "instructions", instructions)
+			}
+			log.Debug("Generating OpenAI TTS audio", logFields...)
+
+			// Generate TTS audio
+			params := openai.AudioSpeechNewParams{
+				Model: openai.SpeechModel(model),
+				Input: text,
+				Voice: openai.AudioSpeechNewParamsVoice(voice),
+			}
+			if speed != 1.0 {
+				params.Speed = openai.Float(speed)
+			}
+			if instructions != "" {
+				params.Instructions = openai.String(instructions)
+			}
+
+			response, err := client.Audio.Speech.New(ctx, params)
+			if err != nil {
+				log.Error("Failed to generate OpenAI TTS audio", "error", err)
+				result := mcp.NewToolResultText(fmt.Sprintf("Error: Failed to generate TTS audio: %v", err))
+				result.IsError = true
+				return result, nil
+			}
+			defer response.Body.Close()
+
+			log.Debug("Decoding MP3 stream from OpenAI")
+			// OpenAI returns MP3 format by default
+			streamer, format, err := mp3.Decode(response.Body)
+			if err != nil {
+				log.Error("Failed to decode OpenAI TTS response", "error", err)
+				result := mcp.NewToolResultText(fmt.Sprintf("Error: Failed to decode response: %v", err))
+				result.IsError = true
+				return result, nil
+			}
+			defer streamer.Close()
+
+			log.Debug("Initializing speaker for OpenAI TTS", "sampleRate", format.SampleRate)
+			speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10))
+			done := make(chan bool)
+			speaker.Play(beep.Seq(streamer, beep.Callback(func() {
+				done <- true
+			})))
+
+			logFields = []any{"text", text, "voice", voice, "model", model, "speed", speed}
+			if instructions != "" {
+				logFields = append(logFields, "instructions", instructions)
+			}
+			log.Info("Speaking text via OpenAI TTS", logFields...)
+			// Wait for playback to complete
+			<-done
+			log.Debug("Finished speaking via OpenAI TTS")
+
+			return mcp.NewToolResultText(fmt.Sprintf("Speaking: %s (via OpenAI TTS with voice %s)", text, voice)), nil
 		})
 
 		log.Info("Starting MCP server", "name", "Say TTS Service", "version", Version)
