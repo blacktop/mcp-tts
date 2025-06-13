@@ -63,6 +63,24 @@ Additional features:
 - Speed control from 0.25x to 4.0x (default: 1.0x)
 - Custom voice instructions (e.g., "Speak in a cheerful and positive tone") via parameter or `OPENAI_TTS_INSTRUCTIONS` environment variable
 
+## Configuration
+
+### Suppressing "Speaking:" Output
+
+By default, TTS tools return a message like "Speaking: [text]" when speech completes. This can interfere with LLM responses. To suppress this output:
+
+**Environment Variable:**
+```bash
+export MCP_TTS_SUPPRESS_SPEAKING_OUTPUT=true
+```
+
+**Command Line Flag:**
+```bash
+mcp-tts --suppress-speaking-output
+```
+
+When enabled, tools return "Speech completed" instead of echoing the spoken text.
+
 ## Getting Started
 
 ### Install
@@ -76,16 +94,25 @@ go install github.com/blacktop/mcp-tts@latest
 
 TTS (text-to-speech) MCP Server.
 
-Provides a text-to-speech service using the MacOS 'say' command.
+Provides multiple text-to-speech services via MCP protocol:
 
-Designed to be used with the MCP protocol.
+• say_tts - Uses macOS built-in 'say' command (macOS only)
+• elevenlabs_tts - Uses ElevenLabs API for high-quality speech synthesis
+• google_tts - Uses Google's Gemini TTS models for natural speech
+• openai_tts - Uses OpenAI's TTS API with various voice options
+
+Each tool supports different voices, rates, and configuration options.
+Requires appropriate API keys for cloud-based services.
+
+Designed to be used with the MCP (Model Context Protocol).
 
 Usage:
   mcp-tts [flags]
 
 Flags:
-  -h, --help      help for mcp-tts
-  -v, --verbose   Enable verbose debug logging
+  -h, --help                       help for mcp-tts
+      --suppress-speaking-output   Suppress 'Speaking:' text output
+  -v, --verbose                    Enable verbose debug logging
 ```
 
 #### Set Claude Desktop Config
@@ -100,7 +127,8 @@ Flags:
         "ELEVENLABS_VOICE_ID": "1SM7GgM6IMuvQlz2BwM3",
         "GOOGLE_AI_API_KEY": "********",
         "OPENAI_API_KEY": "********",
-        "OPENAI_TTS_INSTRUCTIONS": "Speak in a cheerful and positive tone"
+        "OPENAI_TTS_INSTRUCTIONS": "Speak in a cheerful and positive tone",
+        "MCP_TTS_SUPPRESS_SPEAKING_OUTPUT": "true"
       }
     }
   }
