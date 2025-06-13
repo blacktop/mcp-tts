@@ -57,6 +57,8 @@ var (
 	Version string
 	// Global cancellation manager
 	cancellationManager *CancellationManager
+	// Flag to suppress "Speaking:" output
+	suppressSpeakingOutput bool
 )
 
 func init() {
@@ -75,6 +77,12 @@ func init() {
 
 	// Define CLI flags
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose debug logging")
+	rootCmd.PersistentFlags().BoolVar(&suppressSpeakingOutput, "suppress-speaking-output", false, "Suppress 'Speaking:' text output")
+	
+	// Check environment variable for suppressing output
+	if os.Getenv("MCP_TTS_SUPPRESS_SPEAKING_OUTPUT") == "true" {
+		suppressSpeakingOutput = true
+	}
 }
 
 // rootCmd represents the base command when called without any subcommands
@@ -160,12 +168,19 @@ Designed to be used with the MCP (Model Context Protocol).`,
 				return nil, fmt.Errorf("failed to start say command: %v", err)
 			}
 
+			var content string
+			if suppressSpeakingOutput {
+				content = "Speech completed"
+			} else {
+				content = fmt.Sprintf("Speaking: %s", text)
+			}
+			
 			return mcp.NewGetPromptResult(
 				"Speaking text",
 				[]mcp.PromptMessage{
 					mcp.NewPromptMessage(
 						mcp.RoleUser,
-						mcp.NewTextContent(fmt.Sprintf("Speaking: %s", text)),
+						mcp.NewTextContent(content),
 					),
 				},
 			), nil
@@ -273,6 +288,9 @@ Designed to be used with the MCP (Model Context Protocol).`,
 						return result, nil
 					}
 					log.Info("Speaking text completed", "text", text)
+					if suppressSpeakingOutput {
+						return mcp.NewToolResultText("Speech completed"), nil
+					}
 					return mcp.NewToolResultText(fmt.Sprintf("Speaking: %s", text)), nil
 				case <-ctx.Done():
 					log.Info("Say command cancelled by user")
@@ -485,6 +503,9 @@ Designed to be used with the MCP (Model Context Protocol).`,
 				return result, nil
 			}
 
+			if suppressSpeakingOutput {
+				return mcp.NewToolResultText("Speech completed"), nil
+			}
 			return mcp.NewToolResultText(fmt.Sprintf("Speaking: %s", text)), nil
 		}))
 
@@ -623,6 +644,9 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			select {
 			case <-done:
 				log.Debug("Google TTS audio playback completed normally")
+				if suppressSpeakingOutput {
+					return mcp.NewToolResultText("Speech completed"), nil
+				}
 				return mcp.NewToolResultText(fmt.Sprintf("Speaking: %s (via Google TTS with voice %s)", text, voice)), nil
 			case <-ctx.Done():
 				log.Debug("Context cancelled, stopping Google TTS audio playback")
@@ -776,6 +800,9 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			select {
 			case <-done:
 				log.Debug("OpenAI TTS audio playback completed normally")
+				if suppressSpeakingOutput {
+					return mcp.NewToolResultText("Speech completed"), nil
+				}
 				return mcp.NewToolResultText(fmt.Sprintf("Speaking: %s (via OpenAI TTS with voice %s)", text, voice)), nil
 			case <-ctx.Done():
 				log.Debug("Context cancelled, stopping OpenAI TTS audio playback")
