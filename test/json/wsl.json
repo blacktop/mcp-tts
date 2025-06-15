@@ -1,0 +1,12 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "wsl_tts",
+    "arguments": {
+      "text": "Hello from WSL! This is a test of the Windows text-to-speech engine.",
+      "rate": 0
+    }
+  }
+}

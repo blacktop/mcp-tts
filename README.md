@@ -18,8 +18,9 @@
 
 Adds Text-to-Speech to things like Claude Desktop and Cursor IDE.  
 
-It registers four TTS tools: 
- - `say_tts` 
+It registers five TTS tools: 
+ - `say_tts` (macOS only)
+ - `wsl_tts` (WSL only)
  - `elevenlabs_tts`
  - `google_tts`
  - `openai_tts`
@@ -27,6 +28,23 @@ It registers four TTS tools:
 ### `say_tts`
 
 Uses the macOS `say` binary to speak the text with built-in system voices
+
+### `wsl_tts`
+
+**WSL-specific native TTS for offline speech synthesis**
+
+Uses Windows text-to-speech via PowerShell when running in WSL (Windows Subsystem for Linux). This tool bridges the gap between Linux environments and Windows audio capabilities, providing:
+
+- **Offline Operation**: No API keys or internet connection required
+- **Native Windows Voices**: Access to all installed Windows TTS voices
+- **Cross-Platform Bridge**: Leverages Windows audio system from within Linux
+- **Rate Control**: Speech rate adjustment from -10 (slowest) to 10 (fastest)
+- **Automatic Detection**: Only registers when running in WSL environment
+
+**Why WSL TTS?**
+WSL environments cannot directly access Linux audio devices (ALSA/PulseAudio), making traditional Linux TTS tools unusable. However, WSL can execute Windows programs including PowerShell, enabling access to the Windows Speech API (SAPI) for native text-to-speech functionality.
+
+**Technical Implementation**: Uses `powershell.exe -Command` to execute `System.Speech.Synthesis.SpeechSynthesizer` with proper text escaping and cancellation support.
 
 ### `elevenlabs_tts`
 
@@ -85,6 +103,23 @@ When enabled, tools return "Speech completed" instead of echoing the spoken text
 
 ### Install
 
+#### Linux/WSL Build Dependencies
+
+On Linux and WSL, you need to install ALSA development libraries before building:
+
+```bash
+# Ubuntu/Debian
+sudo apt-get install libasound2-dev
+
+# Fedora/RHEL
+sudo dnf install alsa-lib-devel
+
+# Arch Linux
+sudo pacman -S alsa-lib
+```
+
+#### Go Install
+
 ```bash
 go install github.com/blacktop/mcp-tts@latest
 ```
@@ -97,6 +132,7 @@ TTS (text-to-speech) MCP Server.
 Provides multiple text-to-speech services via MCP protocol:
 
 • say_tts - Uses macOS built-in 'say' command (macOS only)
+• wsl_tts - Uses Windows TTS via PowerShell (WSL only)
 • elevenlabs_tts - Uses ElevenLabs API for high-quality speech synthesis
 • google_tts - Uses Google's Gemini TTS models for natural speech
 • openai_tts - Uses OpenAI's TTS API with various voice options

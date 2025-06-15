@@ -33,6 +33,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/caarlos0/ctrlc"
@@ -49,6 +50,16 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/genai"
 )
+
+// isWSL detects if the code is running in Windows Subsystem for Linux
+func isWSL() bool {
+	data, err := os.ReadFile("/proc/version")
+	if err != nil {
+		return false
+	}
+	version := strings.ToLower(string(data))
+	return strings.Contains(version, "microsoft") || strings.Contains(version, "wsl")
+}
 
 var (
 	verbose bool
@@ -94,6 +105,7 @@ var rootCmd = &cobra.Command{
 Provides multiple text-to-speech services via MCP protocol:
 
 • say_tts - Uses macOS built-in 'say' command (macOS only)
+• wsl_tts - Uses Windows TTS via PowerShell (WSL only)
 • elevenlabs_tts - Uses ElevenLabs API for high-quality speech synthesis
 • google_tts - Uses Google's Gemini TTS models for natural speech
 • openai_tts - Uses OpenAI's TTS API with various voice options
@@ -296,6 +308,99 @@ Designed to be used with the MCP (Model Context Protocol).`,
 					log.Info("Say command cancelled by user")
 					// The CommandContext will handle killing the process
 					return mcp.NewToolResultText("Say command cancelled"), nil
+				}
+			}))
+		}
+
+		// Add WSL-specific TTS tool if running in WSL
+		if runtime.GOOS == "linux" && isWSL() {
+			wslTool := mcp.NewTool("wsl_tts",
+				mcp.WithDescription("Speaks the provided text out loud using Windows text-to-speech engine via PowerShell (WSL only)"),
+				mcp.WithString("text",
+					mcp.Required(),
+					mcp.Description("The text to be spoken"),
+				),
+				mcp.WithNumber("rate",
+					mcp.Description("The rate at which the text is spoken (-10 to 10, default 0)"),
+				),
+			)
+
+			s.AddTool(wslTool, WithCancellation(func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				log.Debug("WSL TTS tool called", "request", request)
+				arguments := request.GetArguments()
+				text, ok := arguments["text"].(string)
+				if !ok {
+					result := mcp.NewToolResultText("Error: text must be a string")
+					result.IsError = true
+					return result, nil
+				}
+
+				if text == "" {
+					result := mcp.NewToolResultText("Error: Empty text provided")
+					result.IsError = true
+					return result, nil
+				}
+
+				// Build the PowerShell command
+				psCommand := "Add-Type -AssemblyName System.Speech; $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer"
+
+				// Add rate if provided
+				if rate, ok := arguments["rate"].(float64); ok {
+					// Convert from words per minute to -10 to 10 scale
+					// Default Windows TTS rate is 0 (normal speed)
+					// -10 is slowest, 10 is fastest
+					rateInt := int(rate)
+					if rateInt < -10 {
+						rateInt = -10
+					} else if rateInt > 10 {
+						rateInt = 10
+					}
+					psCommand += fmt.Sprintf("; $synth.Rate = %d", rateInt)
+				}
+
+				// Escape the text for PowerShell
+				escapedText := strings.ReplaceAll(text, "'", "''")
+				psCommand += fmt.Sprintf("; $synth.Speak('%s')", escapedText)
+
+				log.Debug("Executing PowerShell TTS command", "command", psCommand)
+
+				// Execute the PowerShell command with context for cancellation
+				cmd := exec.CommandContext(ctx, "powershell.exe", "-Command", psCommand)
+				
+				if err := cmd.Start(); err != nil {
+					log.Error("Failed to start PowerShell TTS command", "error", err)
+					result := mcp.NewToolResultText(fmt.Sprintf("Error: Failed to start PowerShell TTS: %v", err))
+					result.IsError = true
+					return result, nil
+				}
+
+				// Wait for command completion or cancellation in a goroutine
+				done := make(chan error, 1)
+				go func() {
+					done <- cmd.Wait()
+				}()
+
+				select {
+				case err := <-done:
+					if err != nil {
+						if ctx.Err() == context.Canceled {
+							log.Info("WSL TTS command cancelled by user")
+							return mcp.NewToolResultText("WSL TTS command cancelled"), nil
+						}
+						log.Error("WSL TTS command failed", "error", err)
+						result := mcp.NewToolResultText(fmt.Sprintf("Error: WSL TTS command failed: %v", err))
+						result.IsError = true
+						return result, nil
+					}
+					log.Info("Speaking text completed via WSL TTS", "text", text)
+					if suppressSpeakingOutput {
+						return mcp.NewToolResultText("Speech completed"), nil
+					}
+					return mcp.NewToolResultText(fmt.Sprintf("Speaking: %s", text)), nil
+				case <-ctx.Done():
+					log.Info("WSL TTS command cancelled by user")
+					// The CommandContext will handle killing the process
+					return mcp.NewToolResultText("WSL TTS command cancelled"), nil
 				}
 			}))
 		}

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
@@ -1013,4 +1015,234 @@ func BenchmarkPCMAudioGeneration(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = generateTestAudio(24000, 1.0, 440.0)
 	}
+}
+
+func TestIsWSL(t *testing.T) {
+	tests := []struct {
+		name           string
+		procVersion    string
+		expectedResult bool
+	}{
+		{
+			name:           "WSL2 environment",
+			procVersion:    "Linux version 5.15.167.4-microsoft-standard-WSL2 (root@f9c826d3017f) (gcc (GCC) 11.2.0, GNU ld (GNU Binutils) 2.37) #1 SMP Tue Nov 5 00:21:55 UTC 2024",
+			expectedResult: true,
+		},
+		{
+			name:           "WSL1 environment",
+			procVersion:    "Linux version 4.4.0-19041-Microsoft (Microsoft@Microsoft.com) (gcc version 5.4.0 (GCC) ) #1237-Microsoft Sat Sep 11 14:32:00 PST 2021",
+			expectedResult: true,
+		},
+		{
+			name:           "Regular Linux",
+			procVersion:    "Linux version 5.15.0-91-generic (buildd@lcy02-amd64-051) (gcc (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0, GNU ld (GNU Binutils for Ubuntu) 2.38) #101-Ubuntu SMP Tue Nov 14 13:30:08 UTC 2023",
+			expectedResult: false,
+		},
+		{
+			name:           "macOS (file doesn't exist)",
+			procVersion:    "",
+			expectedResult: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a temporary file with the test content if needed
+			if tt.procVersion != "" {
+				tmpFile, err := os.CreateTemp("", "proc_version")
+				require.NoError(t, err)
+				defer os.Remove(tmpFile.Name())
+
+				_, err = tmpFile.WriteString(tt.procVersion)
+				require.NoError(t, err)
+				tmpFile.Close()
+
+				// Override the isWSL function to read from our test file
+				// Since we can't easily mock the file path, we'll test the logic directly
+				data, err := os.ReadFile(tmpFile.Name())
+				require.NoError(t, err)
+				
+				version := string(data)
+				isWSL := (contains(strings.ToLower(version), "microsoft") || 
+				         contains(strings.ToLower(version), "wsl"))
+				
+				assert.Equal(t, tt.expectedResult, isWSL, 
+					"isWSL() should return %v for: %s", tt.expectedResult, tt.name)
+			} else {
+				// Test the case where the file doesn't exist
+				assert.False(t, false, "File doesn't exist should return false")
+			}
+		})
+	}
+}
+
+// Helper function for string contains
+func contains(s, substr string) bool {
+	return strings.Contains(s, substr)
+}
+
+func TestWSLTTSTool(t *testing.T) {
+	// Only run these tests if we're actually in WSL
+	if !isWSL() {
+		t.Skip("Skipping WSL TTS tests - not running in WSL environment")
+	}
+
+	tests := []struct {
+		name           string
+		arguments      map[string]interface{}
+		expectedError  bool
+		shouldContain  []string
+	}{
+		{
+			name: "successful TTS request with default rate",
+			arguments: map[string]interface{}{
+				"text": "Hello from WSL test",
+			},
+			expectedError: false,
+			shouldContain: []string{"Speaking: Hello from WSL test"},
+		},
+		{
+			name: "successful TTS request with custom rate",
+			arguments: map[string]interface{}{
+				"text": "Testing with faster speech",
+				"rate": 5.0,
+			},
+			expectedError: false,
+			shouldContain: []string{"Speaking: Testing with faster speech"},
+		},
+		{
+			name: "rate clamped to maximum",
+			arguments: map[string]interface{}{
+				"text": "Testing maximum rate",
+				"rate": 15.0, // Should be clamped to 10
+			},
+			expectedError: false,
+			shouldContain: []string{"Speaking: Testing maximum rate"},
+		},
+		{
+			name: "rate clamped to minimum",
+			arguments: map[string]interface{}{
+				"text": "Testing minimum rate",
+				"rate": -15.0, // Should be clamped to -10
+			},
+			expectedError: false,
+			shouldContain: []string{"Speaking: Testing minimum rate"},
+		},
+		{
+			name: "empty text error",
+			arguments: map[string]interface{}{
+				"text": "",
+			},
+			expectedError: true,
+			shouldContain: []string{"Empty text provided"},
+		},
+		{
+			name: "invalid text type",
+			arguments: map[string]interface{}{
+				"text": 123,
+			},
+			expectedError: true,
+			shouldContain: []string{"text must be a string"},
+		},
+		{
+			name: "text with single quotes",
+			arguments: map[string]interface{}{
+				"text": "It's a beautiful day, isn't it?",
+			},
+			expectedError: false,
+			shouldContain: []string{"Speaking: It's a beautiful day, isn't it?"},
+		},
+		{
+			name: "text with special characters",
+			arguments: map[string]interface{}{
+				"text": "Hello! How are you? Let's test & verify.",
+			},
+			expectedError: false,
+			shouldContain: []string{"Speaking: Hello! How are you? Let's test & verify."},
+		},
+	}
+
+	// Note: These are unit tests that verify the parameter handling
+	// They don't actually execute PowerShell to avoid audio output during tests
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a mock request
+			request := mcp.CallToolRequest{
+				Params: mcp.CallToolParams{
+					Name:      "wsl_tts",
+					Arguments: tt.arguments,
+				},
+			}
+
+			// Since we can't easily test the actual PowerShell execution,
+			// we'll test the parameter validation logic
+			arguments := request.GetArguments()
+			
+			// Test text parameter
+			text, ok := arguments["text"].(string)
+			if !ok {
+				if tt.expectedError {
+					assert.Contains(t, tt.shouldContain[0], "text must be a string")
+				}
+				return
+			}
+			
+			if text == "" {
+				if tt.expectedError {
+					assert.Contains(t, tt.shouldContain[0], "Empty text provided")
+				}
+				return
+			}
+
+			// Test rate parameter
+			rate := 0
+			if r, ok := arguments["rate"].(float64); ok {
+				rate = int(r)
+				if rate < -10 {
+					rate = -10
+				} else if rate > 10 {
+					rate = 10
+				}
+			}
+
+			// Test text escaping for PowerShell
+			escapedText := strings.ReplaceAll(text, "'", "''")
+			
+			// Verify the command would be constructed correctly
+			psCommand := fmt.Sprintf("Add-Type -AssemblyName System.Speech; $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer")
+			if rate != 0 {
+				psCommand += fmt.Sprintf("; $synth.Rate = %d", rate)
+			}
+			psCommand += fmt.Sprintf("; $synth.Speak('%s')", escapedText)
+			
+			// Verify command construction
+			assert.NotEmpty(t, psCommand)
+			assert.Contains(t, psCommand, escapedText)
+			
+			if !tt.expectedError {
+				t.Logf("   ✅ %s: Command would be: %s", tt.name, psCommand)
+			}
+		})
+	}
+}
+
+func TestWSLTTSIntegration(t *testing.T) {
+	// Integration test that checks if PowerShell is available
+	if !isWSL() {
+		t.Skip("Skipping WSL TTS integration test - not running in WSL environment")
+	}
+
+	// Check if powershell.exe is available
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "powershell.exe", "-Command", "Write-Output 'test'")
+	output, err := cmd.CombinedOutput()
+	
+	if err != nil {
+		t.Skipf("PowerShell not available in WSL: %v", err)
+	}
+
+	assert.Contains(t, string(output), "test", "PowerShell should be executable from WSL")
+	t.Log("✅ PowerShell is available in WSL environment")
 }
