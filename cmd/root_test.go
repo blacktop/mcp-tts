@@ -1081,10 +1081,10 @@ func contains(s, substr string) bool {
 	return strings.Contains(s, substr)
 }
 
-func TestWSLTTSTool(t *testing.T) {
-	// Only run these tests if we're actually in WSL
-	if !isWSL() {
-		t.Skip("Skipping WSL TTS tests - not running in WSL environment")
+func TestWindowsSpeechTTSTool(t *testing.T) {
+	// Only run these tests if Windows Speech is available via PowerShell
+	if !canRunPowerShell() {
+		t.Skip("Skipping Windows Speech TTS tests - PowerShell not available")
 	}
 
 	tests := []struct {
@@ -1096,19 +1096,19 @@ func TestWSLTTSTool(t *testing.T) {
 		{
 			name: "successful TTS request with default rate",
 			arguments: map[string]interface{}{
-				"text": "Hello from WSL test",
+				"text": "Hello from Windows Speech test",
 			},
 			expectedError: false,
-			shouldContain: []string{"Speaking: Hello from WSL test"},
+			shouldContain: []string{"Speaking: Hello from Windows Speech test"},
 		},
 		{
 			name: "successful TTS request with custom rate",
 			arguments: map[string]interface{}{
-				"text": "Testing with faster speech",
+				"text": "Testing with faster speech via Windows Speech",
 				"rate": 5.0,
 			},
 			expectedError: false,
-			shouldContain: []string{"Speaking: Testing with faster speech"},
+			shouldContain: []string{"Speaking: Testing with faster speech via Windows Speech"},
 		},
 		{
 			name: "rate clamped to maximum",
@@ -1160,6 +1160,24 @@ func TestWSLTTSTool(t *testing.T) {
 			expectedError: false,
 			shouldContain: []string{"Speaking: Hello! How are you? Let's test & verify."},
 		},
+		{
+			name: "custom voice selection",
+			arguments: map[string]interface{}{
+				"text":  "Testing voice selection",
+				"voice": "Microsoft Zira Desktop",
+			},
+			expectedError: false,
+			shouldContain: []string{"Speaking: Testing voice selection"},
+		},
+		{
+			name: "voice with single quotes",
+			arguments: map[string]interface{}{
+				"text":  "Testing voice with quotes",
+				"voice": "Voice's Name",
+			},
+			expectedError: false,
+			shouldContain: []string{"Speaking: Testing voice with quotes"},
+		},
 	}
 
 	// Note: These are unit tests that verify the parameter handling
@@ -1169,7 +1187,7 @@ func TestWSLTTSTool(t *testing.T) {
 			// Create a mock request
 			request := mcp.CallToolRequest{
 				Params: mcp.CallToolParams{
-					Name:      "wsl_tts",
+					Name:      "windows_speech_tts",
 					Arguments: tt.arguments,
 				},
 			}
@@ -1194,6 +1212,12 @@ func TestWSLTTSTool(t *testing.T) {
 				return
 			}
 
+			// Test voice parameter
+			voice := ""
+			if v, ok := arguments["voice"].(string); ok && v != "" {
+				voice = v
+			}
+
 			// Test rate parameter
 			rate := 0
 			if r, ok := arguments["rate"].(float64); ok {
@@ -1210,9 +1234,16 @@ func TestWSLTTSTool(t *testing.T) {
 			
 			// Verify the command would be constructed correctly
 			psCommand := fmt.Sprintf("Add-Type -AssemblyName System.Speech; $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer")
+			
+			if voice != "" {
+				escapedVoice := strings.ReplaceAll(voice, "'", "''")
+				psCommand += fmt.Sprintf("; $synth.SelectVoice('%s')", escapedVoice)
+			}
+			
 			if rate != 0 {
 				psCommand += fmt.Sprintf("; $synth.Rate = %d", rate)
 			}
+			
 			psCommand += fmt.Sprintf("; $synth.Speak('%s')", escapedText)
 			
 			// Verify command construction
@@ -1226,10 +1257,10 @@ func TestWSLTTSTool(t *testing.T) {
 	}
 }
 
-func TestWSLTTSIntegration(t *testing.T) {
-	// Integration test that checks if PowerShell is available
-	if !isWSL() {
-		t.Skip("Skipping WSL TTS integration test - not running in WSL environment")
+func TestWindowsSpeechTTSIntegration(t *testing.T) {
+	// Integration test that checks if Windows Speech is available via PowerShell
+	if !canRunPowerShell() {
+		t.Skip("Skipping Windows Speech TTS integration test - PowerShell not available")
 	}
 
 	// Check if powershell.exe is available
@@ -1240,9 +1271,10 @@ func TestWSLTTSIntegration(t *testing.T) {
 	output, err := cmd.CombinedOutput()
 	
 	if err != nil {
-		t.Skipf("PowerShell not available in WSL: %v", err)
+		t.Skipf("PowerShell not available for Windows Speech: %v", err)
 	}
 
-	assert.Contains(t, string(output), "test", "PowerShell should be executable from WSL")
-	t.Log("✅ PowerShell is available in WSL environment")
+	assert.Contains(t, string(output), "test", "PowerShell should be executable for Windows Speech")
+	t.Log("✅ PowerShell is available for Windows Speech TTS")
 }
+

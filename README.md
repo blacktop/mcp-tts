@@ -18,9 +18,10 @@
 
 Adds Text-to-Speech to things like Claude Desktop and Cursor IDE.  
 
-It registers five TTS tools: 
+It registers six TTS tools: 
  - `say_tts` (macOS only)
- - `wsl_tts` (WSL only)
+ - `windows_speech_tts` (Windows/WSL)
+ - `windows_speech_voices` (Windows/WSL)
  - `elevenlabs_tts`
  - `google_tts`
  - `openai_tts`
@@ -29,22 +30,25 @@ It registers five TTS tools:
 
 Uses the macOS `say` binary to speak the text with built-in system voices
 
-### `wsl_tts`
+### `windows_speech_tts` & `windows_speech_voices`
 
-**WSL-specific native TTS for offline speech synthesis**
+**Cross-platform Windows Speech API TTS for offline speech synthesis**
 
-Uses Windows text-to-speech via PowerShell when running in WSL (Windows Subsystem for Linux). This tool bridges the gap between Linux environments and Windows audio capabilities, providing:
+These tools provide Windows text-to-speech functionality that works seamlessly on both native Windows and WSL (Windows Subsystem for Linux) environments. By using the same PowerShell-based approach for both platforms, we ensure consistent behavior regardless of where the application runs.
 
+**Key Features:**
+- **Unified Implementation**: Single codebase works on both Windows and WSL
 - **Offline Operation**: No API keys or internet connection required
-- **Native Windows Voices**: Access to all installed Windows TTS voices
-- **Cross-Platform Bridge**: Leverages Windows audio system from within Linux
+- **Voice Selection**: Choose from all installed Windows TTS voices via `windows_speech_voices`
+- **Voice Control**: Specify exact voice in `windows_speech_tts` (e.g., "Microsoft Zira Desktop")
 - **Rate Control**: Speech rate adjustment from -10 (slowest) to 10 (fastest)
-- **Automatic Detection**: Only registers when running in WSL environment
+- **Security**: Proper text escaping prevents command injection attacks
 
-**Why WSL TTS?**
-WSL environments cannot directly access Linux audio devices (ALSA/PulseAudio), making traditional Linux TTS tools unusable. However, WSL can execute Windows programs including PowerShell, enabling access to the Windows Speech API (SAPI) for native text-to-speech functionality.
+**Why This Approach Works for Both Platforms:**
+- **Windows**: Direct access to `powershell.exe` and Windows Speech API
+- **WSL**: Windows interop allows executing `powershell.exe` from Linux, bridging the gap where WSL cannot access Linux audio devices (ALSA/PulseAudio)
 
-**Technical Implementation**: Uses `powershell.exe -Command` to execute `System.Speech.Synthesis.SpeechSynthesizer` with proper text escaping and cancellation support.
+**Technical Implementation**: Uses `powershell.exe -Command` to execute `System.Speech.Synthesis.SpeechSynthesizer` with proper text and voice name escaping, plus cancellation support.
 
 ### `elevenlabs_tts`
 
@@ -132,7 +136,8 @@ TTS (text-to-speech) MCP Server.
 Provides multiple text-to-speech services via MCP protocol:
 
 • say_tts - Uses macOS built-in 'say' command (macOS only)
-• wsl_tts - Uses Windows TTS via PowerShell (WSL only)
+• windows_speech_tts - Uses Windows Speech API via PowerShell (Windows/WSL)
+• windows_speech_voices - Lists available Windows Speech API voices (Windows/WSL)
 • elevenlabs_tts - Uses ElevenLabs API for high-quality speech synthesis
 • google_tts - Uses Google's Gemini TTS models for natural speech
 • openai_tts - Uses OpenAI's TTS API with various voice options

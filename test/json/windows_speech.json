@@ -1,0 +1,13 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "windows_speech_tts",
+    "arguments": {
+      "text": "Hello from Windows Speech! This is a test of the Windows Speech API via PowerShell.",
+      "rate": 1,
+      "voice": "Microsoft Zira Desktop"
+    }
+  }
+}

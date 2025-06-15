@@ -61,6 +61,20 @@ func isWSL() bool {
 	return strings.Contains(version, "microsoft") || strings.Contains(version, "wsl")
 }
 
+// canRunPowerShell checks if PowerShell is available for TTS
+func canRunPowerShell() bool {
+	// PowerShell is available on Windows and WSL
+	if runtime.GOOS == "windows" {
+		return true
+	}
+	if runtime.GOOS == "linux" && isWSL() {
+		return true
+	}
+	// Could also be available on other platforms with PowerShell Core,
+	// but we'll be conservative for now
+	return false
+}
+
 var (
 	verbose bool
 	logger  *log.Logger
@@ -105,7 +119,8 @@ var rootCmd = &cobra.Command{
 Provides multiple text-to-speech services via MCP protocol:
 
 • say_tts - Uses macOS built-in 'say' command (macOS only)
-• wsl_tts - Uses Windows TTS via PowerShell (WSL only)
+• windows_speech_tts - Uses Windows Speech API via PowerShell (Windows/WSL)
+• windows_speech_voices - Lists available Windows Speech API voices (Windows/WSL)
 • elevenlabs_tts - Uses ElevenLabs API for high-quality speech synthesis
 • google_tts - Uses Google's Gemini TTS models for natural speech
 • openai_tts - Uses OpenAI's TTS API with various voice options
@@ -312,10 +327,10 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			}))
 		}
 
-		// Add WSL-specific TTS tool if running in WSL
-		if runtime.GOOS == "linux" && isWSL() {
-			wslTool := mcp.NewTool("wsl_tts",
-				mcp.WithDescription("Speaks the provided text out loud using Windows text-to-speech engine via PowerShell (WSL only)"),
+		// Add Windows Speech TTS tool if PowerShell is available
+		if canRunPowerShell() {
+			windowsSpeechTool := mcp.NewTool("windows_speech_tts",
+				mcp.WithDescription("Uses Windows Speech API via PowerShell (Windows/WSL)"),
 				mcp.WithString("text",
 					mcp.Required(),
 					mcp.Description("The text to be spoken"),
@@ -323,10 +338,13 @@ Designed to be used with the MCP (Model Context Protocol).`,
 				mcp.WithNumber("rate",
 					mcp.Description("The rate at which the text is spoken (-10 to 10, default 0)"),
 				),
+				mcp.WithString("voice",
+					mcp.Description("The voice to use for speech (e.g., 'Microsoft David Desktop', 'Microsoft Zira Desktop')"),
+				),
 			)
 
-			s.AddTool(wslTool, WithCancellation(func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-				log.Debug("WSL TTS tool called", "request", request)
+			s.AddTool(windowsSpeechTool, WithCancellation(func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				log.Debug("Windows Speech TTS tool called", "request", request)
 				arguments := request.GetArguments()
 				text, ok := arguments["text"].(string)
 				if !ok {
@@ -343,6 +361,13 @@ Designed to be used with the MCP (Model Context Protocol).`,
 
 				// Build the PowerShell command
 				psCommand := "Add-Type -AssemblyName System.Speech; $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer"
+
+				// Add voice if provided
+				if voice, ok := arguments["voice"].(string); ok && voice != "" {
+					// Escape the voice name for PowerShell
+					escapedVoice := strings.ReplaceAll(voice, "'", "''")
+					psCommand += fmt.Sprintf("; $synth.SelectVoice('%s')", escapedVoice)
+				}
 
 				// Add rate if provided
 				if rate, ok := arguments["rate"].(float64); ok {
@@ -384,24 +409,67 @@ Designed to be used with the MCP (Model Context Protocol).`,
 				case err := <-done:
 					if err != nil {
 						if ctx.Err() == context.Canceled {
-							log.Info("WSL TTS command cancelled by user")
-							return mcp.NewToolResultText("WSL TTS command cancelled"), nil
+							log.Info("Windows Speech TTS command cancelled by user")
+							return mcp.NewToolResultText("Windows Speech TTS command cancelled"), nil
 						}
-						log.Error("WSL TTS command failed", "error", err)
-						result := mcp.NewToolResultText(fmt.Sprintf("Error: WSL TTS command failed: %v", err))
+						log.Error("Windows Speech TTS command failed", "error", err)
+						result := mcp.NewToolResultText(fmt.Sprintf("Error: Windows Speech TTS command failed: %v", err))
 						result.IsError = true
 						return result, nil
 					}
-					log.Info("Speaking text completed via WSL TTS", "text", text)
+					log.Info("Speaking text completed via Windows Speech TTS", "text", text)
 					if suppressSpeakingOutput {
 						return mcp.NewToolResultText("Speech completed"), nil
 					}
 					return mcp.NewToolResultText(fmt.Sprintf("Speaking: %s", text)), nil
 				case <-ctx.Done():
-					log.Info("WSL TTS command cancelled by user")
+					log.Info("Windows Speech TTS command cancelled by user")
 					// The CommandContext will handle killing the process
-					return mcp.NewToolResultText("WSL TTS command cancelled"), nil
+					return mcp.NewToolResultText("Windows Speech TTS command cancelled"), nil
 				}
+			}))
+
+			// Add companion tool to list available voices
+			listVoicesTool := mcp.NewTool("windows_speech_voices",
+				mcp.WithDescription("Lists available Windows Speech API voices (Windows/WSL)"),
+			)
+
+			s.AddTool(listVoicesTool, WithCancellation(func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				log.Debug("Windows Speech voices tool called", "request", request)
+
+				// PowerShell command to list available voices
+				psCommand := "Add-Type -AssemblyName System.Speech; $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer; $synth.GetInstalledVoices() | ForEach-Object { $_.VoiceInfo.Name + ' (' + $_.VoiceInfo.Culture + ')' }"
+
+				log.Debug("Executing PowerShell voice list command", "command", psCommand)
+
+				// Execute the PowerShell command with context for cancellation
+				cmd := exec.CommandContext(ctx, "powershell.exe", "-Command", psCommand)
+				
+				output, err := cmd.CombinedOutput()
+				if err != nil {
+					log.Error("Failed to list Windows Speech voices", "error", err)
+					result := mcp.NewToolResultText(fmt.Sprintf("Error: Failed to list voices: %v", err))
+					result.IsError = true
+					return result, nil
+				}
+
+				voiceList := strings.TrimSpace(string(output))
+				if voiceList == "" {
+					return mcp.NewToolResultText("No voices found"), nil
+				}
+
+				// Format the voice list nicely
+				voices := strings.Split(voiceList, "\n")
+				var formattedVoices []string
+				for i, voice := range voices {
+					voice = strings.TrimSpace(voice)
+					if voice != "" {
+						formattedVoices = append(formattedVoices, fmt.Sprintf("%d. %s", i+1, voice))
+					}
+				}
+
+				result := fmt.Sprintf("Available Windows Speech voices:\n\n%s", strings.Join(formattedVoices, "\n"))
+				return mcp.NewToolResultText(result), nil
 			}))
 		}
 
