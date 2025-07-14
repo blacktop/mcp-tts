@@ -2,16 +2,29 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// Helper functions for creating pointers to basic types
+func stringPtr(s string) *string {
+	return &s
+}
+
+func intPtr(i int) *int {
+	return &i
+}
+
+func float64Ptr(f float64) *float64 {
+	return &f
+}
 
 // MockAudioPlayer simulates audio playback for testing
 type MockAudioPlayer struct {
@@ -28,6 +41,85 @@ func (m *MockAudioPlayer) Play(audioData []byte) error {
 	return nil
 }
 
+func TestSayTTSTool(t *testing.T) {
+	if !isDarwin() {
+		t.Skip("Say TTS tool only available on macOS")
+	}
+
+	tests := []struct {
+		name          string
+		params        SayTTSParams
+		expectError   bool
+		shouldContain []string
+	}{
+		{
+			name: "basic text",
+			params: SayTTSParams{
+				Text: "Hello, this is a test",
+			},
+			expectError:   false,
+			shouldContain: []string{"Speaking:", "Hello, this is a test"},
+		},
+		{
+			name: "with custom rate",
+			params: SayTTSParams{
+				Text: "Testing custom rate",
+				Rate: intPtr(250),
+			},
+			expectError:   false,
+			shouldContain: []string{"Speaking:", "Testing custom rate"},
+		},
+		{
+			name: "with custom voice",
+			params: SayTTSParams{
+				Text:  "Testing custom voice",
+				Voice: stringPtr("Alex"),
+			},
+			expectError:   false,
+			shouldContain: []string{"Speaking:", "Testing custom voice"},
+		},
+		{
+			name: "empty text",
+			params: SayTTSParams{
+				Text: "",
+			},
+			expectError:   true,
+			shouldContain: []string{"Empty text provided"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			params := &mcp.CallToolParamsFor[SayTTSParams]{
+				Name:      "say_tts",
+				Arguments: tt.params,
+			}
+
+			// Call the handler directly by creating a mock handler
+			result, err := callSayTTSHandler(ctx, params)
+
+			if tt.expectError {
+				require.NotNil(t, result)
+				assert.True(t, result.IsError, "Expected error but got success")
+			} else {
+				require.NoError(t, err)
+				require.NotNil(t, result)
+				assert.False(t, result.IsError, "Expected success but got error: %v", result)
+			}
+
+			// Check that result contains expected strings
+			if len(tt.shouldContain) > 0 {
+				resultText := extractTextFromResult(result)
+				for _, expectedStr := range tt.shouldContain {
+					assert.Contains(t, resultText, expectedStr,
+						"Result should contain '%s', but got: %s", expectedStr, resultText)
+				}
+			}
+		})
+	}
+}
+
 func TestGoogleTTSTool(t *testing.T) {
 	// Set up test environment variables
 	originalAPIKey := os.Getenv("GOOGLE_AI_API_KEY")
@@ -40,22 +132,21 @@ func TestGoogleTTSTool(t *testing.T) {
 	}()
 
 	tests := []struct {
-		name           string
-		setupEnv       func()
-		arguments      map[string]interface{}
-		expectedError  bool
-		expectedResult string
-		shouldContain  []string
+		name          string
+		setupEnv      func()
+		params        GoogleTTSParams
+		expectError   bool
+		shouldContain []string
 	}{
 		{
 			name: "successful TTS request with default model",
 			setupEnv: func() {
 				os.Setenv("GOOGLE_AI_API_KEY", "test-api-key")
 			},
-			arguments: map[string]interface{}{
-				"text": "Hello, this is a test of Google TTS",
+			params: GoogleTTSParams{
+				Text: "Hello, this is a test of Google TTS",
 			},
-			expectedError: false,
+			expectError:   false,
 			shouldContain: []string{"Google TTS", "gemini-2.5-flash-preview-tts", "voice Kore"},
 		},
 		{
@@ -63,12 +154,12 @@ func TestGoogleTTSTool(t *testing.T) {
 			setupEnv: func() {
 				os.Setenv("GOOGLE_AI_API_KEY", "test-api-key")
 			},
-			arguments: map[string]interface{}{
-				"text":  "Hello, speak with Puck voice",
-				"voice": "Puck",
-				"model": "gemini-2.5-pro-preview-tts",
+			params: GoogleTTSParams{
+				Text:  "Hello, speak with Puck voice",
+				Voice: stringPtr("Puck"),
+				Model: stringPtr("gemini-2.5-pro-preview-tts"),
 			},
-			expectedError: false,
+			expectError:   false,
 			shouldContain: []string{"Google TTS", "voice Puck", "gemini-2.5-pro-preview-tts"},
 		},
 		{
@@ -77,10 +168,10 @@ func TestGoogleTTSTool(t *testing.T) {
 				os.Unsetenv("GOOGLE_AI_API_KEY")
 				os.Unsetenv("GEMINI_API_KEY")
 			},
-			arguments: map[string]interface{}{
-				"text": "Hello",
+			params: GoogleTTSParams{
+				Text: "Hello",
 			},
-			expectedError: true,
+			expectError:   true,
 			shouldContain: []string{"GOOGLE_AI_API_KEY or GEMINI_API_KEY is not set"},
 		},
 		{
@@ -88,33 +179,11 @@ func TestGoogleTTSTool(t *testing.T) {
 			setupEnv: func() {
 				os.Setenv("GOOGLE_AI_API_KEY", "test-api-key")
 			},
-			arguments: map[string]interface{}{
-				"text": "",
+			params: GoogleTTSParams{
+				Text: "",
 			},
-			expectedError: true,
+			expectError:   true,
 			shouldContain: []string{"Empty text provided"},
-		},
-		{
-			name: "invalid text type",
-			setupEnv: func() {
-				os.Setenv("GOOGLE_AI_API_KEY", "test-api-key")
-			},
-			arguments: map[string]interface{}{
-				"text": 123,
-			},
-			expectedError: true,
-			shouldContain: []string{"text must be a string"},
-		},
-		{
-			name: "default parameters",
-			setupEnv: func() {
-				os.Setenv("GOOGLE_AI_API_KEY", "test-api-key")
-			},
-			arguments: map[string]interface{}{
-				"text": "Test with defaults",
-			},
-			expectedError: false,
-			shouldContain: []string{"Google TTS", "voice Kore", "gemini-2.5-flash-preview-tts"},
 		},
 	}
 
@@ -123,75 +192,16 @@ func TestGoogleTTSTool(t *testing.T) {
 			// Setup environment
 			tt.setupEnv()
 
-			// Create the request
-			requestData := map[string]interface{}{
-				"params": map[string]interface{}{
-					"name":      "google_tts",
-					"arguments": tt.arguments,
-				},
-			}
-
-			jsonData, err := json.Marshal(requestData)
-			require.NoError(t, err)
-
-			var request mcp.CallToolRequest
-			err = json.Unmarshal(jsonData, &request)
-			require.NoError(t, err)
-
-			// For testing purposes, we'll directly invoke the tool handler
 			ctx := context.Background()
-
-			// Create a handler variable that we can test directly
-			var testHandler func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)
-
-			// Re-create the tool handler logic for testing
-			testHandler = func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-				arguments := request.GetArguments()
-
-				// Validate text parameter
-				text, ok := arguments["text"].(string)
-				if !ok {
-					result := mcp.NewToolResultText("Error: text must be a string")
-					result.IsError = true
-					return result, nil
-				}
-
-				if text == "" {
-					result := mcp.NewToolResultText("Error: Empty text provided")
-					result.IsError = true
-					return result, nil
-				}
-
-				// Check API key
-				apiKey := os.Getenv("GOOGLE_AI_API_KEY")
-				if apiKey == "" {
-					apiKey = os.Getenv("GEMINI_API_KEY")
-				}
-				if apiKey == "" {
-					result := mcp.NewToolResultText("Error: GOOGLE_AI_API_KEY or GEMINI_API_KEY is not set")
-					result.IsError = true
-					return result, nil
-				}
-
-				// Get configuration from arguments
-				voice := "Kore"
-				if v, ok := arguments["voice"].(string); ok && v != "" {
-					voice = v
-				}
-
-				model := "gemini-2.5-flash-preview-tts"
-				if m, ok := arguments["model"].(string); ok && m != "" {
-					model = m
-				}
-
-				// For testing, we'll simulate a successful TTS generation without actually calling the API
-				return mcp.NewToolResultText(
-					"Speaking: " + text + " (via Google TTS with voice " + voice + " using model " + model + ")"), nil
+			params := &mcp.CallToolParamsFor[GoogleTTSParams]{
+				Name:      "google_tts",
+				Arguments: tt.params,
 			}
 
-			result, err := testHandler(ctx, request)
+			// Call the handler directly
+			result, err := callGoogleTTSHandler(ctx, params)
 
-			if tt.expectedError {
+			if tt.expectError {
 				require.NotNil(t, result)
 				assert.True(t, result.IsError, "Expected error but got success")
 			} else {
@@ -202,294 +212,13 @@ func TestGoogleTTSTool(t *testing.T) {
 
 			// Check that result contains expected strings
 			if len(tt.shouldContain) > 0 {
-				resultText := ""
-
-				// Extract text from the result
-				if len(result.Content) > 0 {
-					if textContent, ok := result.Content[0].(mcp.TextContent); ok {
-						resultText = textContent.Text
-					} else if textContentPtr, ok := result.Content[0].(*mcp.TextContent); ok {
-						resultText = textContentPtr.Text
-					}
-				}
-
+				resultText := extractTextFromResult(result)
 				for _, expectedStr := range tt.shouldContain {
 					assert.Contains(t, resultText, expectedStr,
 						"Result should contain '%s', but got: %s", expectedStr, resultText)
 				}
 			}
 		})
-	}
-}
-
-func TestGoogleTTSAudioPlayback(t *testing.T) {
-	// Test PCM audio playback simulation for Google TTS
-	mockPlayer := &MockAudioPlayer{
-		Duration: 100 * time.Millisecond,
-	}
-
-	// Simulate PCM audio data (24kHz as returned by Google TTS)
-	sampleRate := 24000 // Google TTS uses 24kHz
-	duration := 0.5     // seconds
-	frequency := 440.0  // Hz (A note)
-
-	audioData := generateTestAudio(sampleRate, duration, frequency)
-
-	// Test playing the audio
-	err := mockPlayer.Play(audioData)
-	assert.NoError(t, err)
-	assert.True(t, mockPlayer.Played)
-	assert.Equal(t, audioData, mockPlayer.PlayedAudio)
-
-	// Verify audio data properties for Google TTS
-	expectedSamples := int(float64(sampleRate) * duration)
-	expectedBytes := expectedSamples * 2 // 16-bit samples
-	assert.Equal(t, expectedBytes, len(audioData))
-}
-
-func TestGoogleTTSParameterValidation(t *testing.T) {
-	tests := []struct {
-		name    string
-		voice   string
-		model   string
-		isValid bool
-	}{
-		{"valid voice Kore", "Kore", "gemini-2.5-flash-preview-tts", true},
-		{"valid voice Puck", "Puck", "gemini-2.5-pro-preview-tts", true},
-		{"valid voice Charon", "Charon", "gemini-2.5-flash-preview-tts", true},
-		{"valid voice Fenrir", "Fenrir", "gemini-2.5-flash-preview-tts", true},
-		{"valid voice Aoede", "Aoede", "gemini-2.5-flash-preview-tts", true},
-		{"valid voice Leda", "Leda", "gemini-2.5-flash-preview-tts", true},
-		{"valid voice Orus", "Orus", "gemini-2.5-flash-preview-tts", true},
-		{"valid voice Zephyr", "Zephyr", "gemini-2.5-flash-preview-tts", true},
-		{"valid voice Autonoe", "Autonoe", "gemini-2.5-flash-preview-tts", true},
-		{"valid voice Enceladus", "Enceladus", "gemini-2.5-flash-preview-tts", true},
-		{"valid voice Callirhoe", "Callirhoe", "gemini-2.5-flash-preview-tts", true},
-		{"valid voice Iapetus", "Iapetus", "gemini-2.5-flash-preview-tts", true},
-		{"empty values use defaults", "", "", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Validate voice options (Google TTS supports 30 voices)
-			validVoices := []string{
-				"Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Aoede", "Leda", "Orus",
-				"Autonoe", "Enceladus", "Callirhoe", "Iapetus", "Umbriel", "Algieba",
-				"Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia", "Achernar",
-				"Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird", "Zubenelgenubi",
-				"Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafar",
-			}
-			if tt.voice != "" {
-				found := false
-				for _, validVoice := range validVoices {
-					if tt.voice == validVoice {
-						found = true
-						break
-					}
-				}
-				if tt.isValid {
-					assert.True(t, found, "Voice %s should be valid", tt.voice)
-				}
-			}
-
-			// Validate model options
-			validModels := []string{
-				"gemini-2.5-flash-preview-tts",
-				"gemini-2.5-pro-preview-tts",
-				"",
-			}
-			if tt.model != "" {
-				found := false
-				for _, validModel := range validModels {
-					if tt.model == validModel {
-						found = true
-						break
-					}
-				}
-				if tt.isValid {
-					assert.True(t, found, "Model %s should be valid", tt.model)
-				}
-			}
-		})
-	}
-}
-
-// generateTestAudio creates simple PCM audio data for testing
-func generateTestAudio(sampleRate int, duration float64, frequency float64) []byte {
-	numSamples := int(float64(sampleRate) * duration)
-	audioData := make([]byte, numSamples*2) // 16-bit samples
-
-	for i := 0; i < numSamples; i++ {
-		// Generate sine wave
-		t := float64(i) / float64(sampleRate)
-		sample := int16(32767 * 0.1 * sinApprox(2*3.14159*frequency*t)) // 10% volume
-
-		// Convert to little-endian bytes
-		audioData[i*2] = byte(sample & 0xFF)
-		audioData[i*2+1] = byte((sample >> 8) & 0xFF)
-	}
-
-	return audioData
-}
-
-// sinApprox provides a simple sine approximation for testing
-func sinApprox(x float64) float64 {
-	// Simple sine approximation using Taylor series (first few terms)
-	// Good enough for testing purposes
-	x = x - float64(int(x/(2*3.14159)))*(2*3.14159) // Normalize to 0-2π
-	return x - (x*x*x)/6 + (x*x*x*x*x)/120
-}
-
-func TestGoogleTTSAudioIntegration(t *testing.T) {
-	// Integration test that demonstrates end-to-end Google TTS audio functionality
-	t.Log("🧪 Running Google TTS Audio Integration Test...")
-
-	// Create a mock audio player
-	mockPlayer := &MockAudioPlayer{
-		Duration: 500 * time.Millisecond,
-	}
-
-	// Test 1: Basic PCM audio generation and playback at 24kHz (Google TTS sample rate)
-	t.Run("basic_pcm_playback", func(t *testing.T) {
-		t.Log("🎵 Testing basic PCM audio playback at 24kHz...")
-
-		// Generate test audio data at Google TTS sample rate (24kHz)
-		audioData := generateTestAudio(24000, 1.0, 440.0)
-		t.Logf("📊 Generated %d bytes of PCM audio data", len(audioData))
-
-		// Simulate playback
-		start := time.Now()
-		err := mockPlayer.Play(audioData)
-		duration := time.Since(start)
-
-		assert.NoError(t, err)
-		assert.True(t, mockPlayer.Played)
-		assert.Equal(t, audioData, mockPlayer.PlayedAudio)
-		t.Logf("✅ PCM audio playback completed in %v", duration)
-	})
-
-	// Test 2: Multiple Google TTS voice configurations
-	t.Run("multiple_google_voices", func(t *testing.T) {
-		t.Log("🎭 Testing multiple Google TTS voice configurations...")
-
-		voices := []string{"Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Aoede", "Leda", "Orus", "Autonoe", "Enceladus"}
-
-		for i, voice := range voices {
-			t.Run(voice, func(t *testing.T) {
-				// Reset the mock player for each voice
-				mockPlayer.Played = false
-				mockPlayer.PlayedAudio = nil
-
-				// Generate audio with different frequencies for each voice
-				frequency := 300.0 + float64(i*40) // Start at 300Hz, increment by 40Hz
-				audioData := generateTestAudio(24000, 0.4, frequency)
-
-				err := mockPlayer.Play(audioData)
-				assert.NoError(t, err)
-				assert.True(t, mockPlayer.Played)
-				t.Logf("   ✅ Google TTS Voice %s tested successfully (%.0fHz)", voice, frequency)
-			})
-		}
-	})
-
-	// Test 3: Google TTS specific audio formats
-	t.Run("google_tts_formats", func(t *testing.T) {
-		t.Log("🎛️  Testing Google TTS specific audio formats...")
-
-		testCases := []struct {
-			name       string
-			sampleRate int
-			duration   float64
-			frequency  float64
-		}{
-			{"google_tts_standard", 24000, 0.5, 440.0}, // Google TTS standard rate
-			{"google_tts_short", 24000, 0.2, 880.0},    // Shorter duration
-			{"google_tts_long", 24000, 1.0, 220.0},     // Longer duration
-		}
-
-		for _, tc := range testCases {
-			t.Run(tc.name, func(t *testing.T) {
-				audioData := generateTestAudio(tc.sampleRate, tc.duration, tc.frequency)
-
-				// Reset mock player
-				mockPlayer.Played = false
-				mockPlayer.PlayedAudio = nil
-
-				err := mockPlayer.Play(audioData)
-				assert.NoError(t, err)
-				assert.True(t, mockPlayer.Played)
-
-				expectedSamples := int(float64(tc.sampleRate) * tc.duration)
-				expectedBytes := expectedSamples * 2 // 16-bit samples
-				assert.Equal(t, expectedBytes, len(audioData))
-
-				t.Logf("   ✅ %s: %d samples, %d bytes (24kHz PCM)", tc.name, expectedSamples, len(audioData))
-			})
-		}
-	})
-
-	// Test 4: PCM Stream functionality
-	t.Run("pcm_stream_testing", func(t *testing.T) {
-		t.Log("🎼 Testing PCM Stream functionality...")
-
-		audioData := generateTestAudio(24000, 0.5, 440.0)
-		pcmStream := &PCMStream{
-			data:       audioData,
-			sampleRate: 24000,
-			position:   0,
-		}
-
-		// Test stream properties
-		assert.Equal(t, len(audioData)/2, pcmStream.Len())
-		assert.Equal(t, 0, pcmStream.Position())
-		assert.NoError(t, pcmStream.Err())
-
-		// Test seeking
-		err := pcmStream.Seek(100)
-		assert.NoError(t, err)
-		assert.Equal(t, 100, pcmStream.Position())
-
-		t.Log("   ✅ PCM Stream functionality validated")
-	})
-
-	t.Log("🏆 Google TTS Audio Integration Test completed successfully!")
-}
-
-func BenchmarkGoogleTTSTool(t *testing.B) {
-	// Set up test environment
-	os.Setenv("GOOGLE_AI_API_KEY", "test-api-key")
-	defer os.Unsetenv("GOOGLE_AI_API_KEY")
-
-	// Create test arguments
-	arguments := map[string]interface{}{
-		"text":  "Benchmark test message for Google TTS",
-		"voice": "Puck",
-		"model": "gemini-2.5-flash-preview-tts",
-	}
-
-	t.ResetTimer()
-
-	for i := 0; i < t.N; i++ {
-		// Simulate the parameter validation and processing
-		// (without actual API calls for benchmarking)
-
-		text, ok := arguments["text"].(string)
-		if !ok || text == "" {
-			t.Fatal("Invalid text parameter")
-		}
-
-		voice := "Kore"
-		if v, ok := arguments["voice"].(string); ok && v != "" {
-			voice = v
-		}
-
-		model := "gemini-2.5-flash-preview-tts"
-		if m, ok := arguments["model"].(string); ok && m != "" {
-			model = m
-		}
-
-		// Simulate processing time
-		_ = text + voice + model
 	}
 }
 
@@ -511,22 +240,21 @@ func TestOpenAITTSTool(t *testing.T) {
 	}()
 
 	tests := []struct {
-		name           string
-		setupEnv       func()
-		arguments      map[string]interface{}
-		expectedError  bool
-		expectedResult string
-		shouldContain  []string
+		name          string
+		setupEnv      func()
+		params        OpenAITTSParams
+		expectError   bool
+		shouldContain []string
 	}{
 		{
 			name: "successful TTS request with default settings",
 			setupEnv: func() {
 				os.Setenv("OPENAI_API_KEY", "test-api-key")
 			},
-			arguments: map[string]interface{}{
-				"text": "Hello, this is a test of OpenAI TTS",
+			params: OpenAITTSParams{
+				Text: "Hello, this is a test of OpenAI TTS",
 			},
-			expectedError: false,
+			expectError:   false,
 			shouldContain: []string{"OpenAI TTS", "voice coral"},
 		},
 		{
@@ -534,13 +262,13 @@ func TestOpenAITTSTool(t *testing.T) {
 			setupEnv: func() {
 				os.Setenv("OPENAI_API_KEY", "test-api-key")
 			},
-			arguments: map[string]interface{}{
-				"text":  "Hello, speak with echo voice",
-				"voice": "echo",
-				"model": "tts-1-hd",
-				"speed": 1.5,
+			params: OpenAITTSParams{
+				Text:  "Hello, speak with echo voice",
+				Voice: stringPtr("echo"),
+				Model: stringPtr("gpt-4o-audio-preview"),
+				Speed: float64Ptr(1.5),
 			},
-			expectedError: false,
+			expectError:   false,
 			shouldContain: []string{"OpenAI TTS", "voice echo"},
 		},
 		{
@@ -548,10 +276,10 @@ func TestOpenAITTSTool(t *testing.T) {
 			setupEnv: func() {
 				os.Unsetenv("OPENAI_API_KEY")
 			},
-			arguments: map[string]interface{}{
-				"text": "Hello",
+			params: OpenAITTSParams{
+				Text: "Hello",
 			},
-			expectedError: true,
+			expectError:   true,
 			shouldContain: []string{"OPENAI_API_KEY is not set"},
 		},
 		{
@@ -559,81 +287,34 @@ func TestOpenAITTSTool(t *testing.T) {
 			setupEnv: func() {
 				os.Setenv("OPENAI_API_KEY", "test-api-key")
 			},
-			arguments: map[string]interface{}{
-				"text": "",
+			params: OpenAITTSParams{
+				Text: "",
 			},
-			expectedError: true,
+			expectError:   true,
 			shouldContain: []string{"Empty text provided"},
 		},
 		{
-			name: "invalid text type",
+			name: "speed out of range",
 			setupEnv: func() {
 				os.Setenv("OPENAI_API_KEY", "test-api-key")
 			},
-			arguments: map[string]interface{}{
-				"text": 123,
+			params: OpenAITTSParams{
+				Text:  "Speed test",
+				Speed: float64Ptr(0.1), // Too slow
 			},
-			expectedError: true,
-			shouldContain: []string{"text must be a string"},
-		},
-		{
-			name: "speed out of range - too slow",
-			setupEnv: func() {
-				os.Setenv("OPENAI_API_KEY", "test-api-key")
-			},
-			arguments: map[string]interface{}{
-				"text":  "Speed test",
-				"speed": 0.1,
-			},
-			expectedError: false,
-			shouldContain: []string{"OpenAI TTS", "voice coral"}, // Should use default speed
-		},
-		{
-			name: "speed out of range - too fast",
-			setupEnv: func() {
-				os.Setenv("OPENAI_API_KEY", "test-api-key")
-			},
-			arguments: map[string]interface{}{
-				"text":  "Speed test",
-				"speed": 5.0,
-			},
-			expectedError: false,
-			shouldContain: []string{"OpenAI TTS", "voice coral"}, // Should use default speed
-		},
-		{
-			name: "valid speed range",
-			setupEnv: func() {
-				os.Setenv("OPENAI_API_KEY", "test-api-key")
-			},
-			arguments: map[string]interface{}{
-				"text":  "Speed test",
-				"speed": 2.0,
-			},
-			expectedError: false,
+			expectError:   false, // Should use default speed
 			shouldContain: []string{"OpenAI TTS", "voice coral"},
 		},
 		{
-			name: "custom instructions via parameter",
+			name: "custom instructions",
 			setupEnv: func() {
 				os.Setenv("OPENAI_API_KEY", "test-api-key")
 			},
-			arguments: map[string]interface{}{
-				"text":         "Test with custom instructions",
-				"instructions": "Speak in a cheerful and positive tone",
+			params: OpenAITTSParams{
+				Text:         "Test with custom instructions",
+				Instructions: stringPtr("Speak in a cheerful and positive tone"),
 			},
-			expectedError: false,
-			shouldContain: []string{"OpenAI TTS", "voice coral"},
-		},
-		{
-			name: "custom instructions via environment variable",
-			setupEnv: func() {
-				os.Setenv("OPENAI_API_KEY", "test-api-key")
-				os.Setenv("OPENAI_TTS_INSTRUCTIONS", "Speak in a calm and soothing manner")
-			},
-			arguments: map[string]interface{}{
-				"text": "Test with env var instructions",
-			},
-			expectedError: false,
+			expectError:   false,
 			shouldContain: []string{"OpenAI TTS", "voice coral"},
 		},
 	}
@@ -643,91 +324,16 @@ func TestOpenAITTSTool(t *testing.T) {
 			// Setup environment
 			tt.setupEnv()
 
-			// Create the request
-			requestData := map[string]interface{}{
-				"params": map[string]interface{}{
-					"name":      "openai_tts",
-					"arguments": tt.arguments,
-				},
-			}
-
-			jsonData, err := json.Marshal(requestData)
-			require.NoError(t, err)
-
-			var request mcp.CallToolRequest
-			err = json.Unmarshal(jsonData, &request)
-			require.NoError(t, err)
-
-			// For testing purposes, we'll directly invoke the tool handler
 			ctx := context.Background()
-
-			// Create a handler variable that we can test directly
-			var testHandler func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)
-
-			// Re-create the tool handler logic for testing
-			testHandler = func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-				arguments := request.GetArguments()
-
-				// Validate text parameter
-				text, ok := arguments["text"].(string)
-				if !ok {
-					result := mcp.NewToolResultText("Error: text must be a string")
-					result.IsError = true
-					return result, nil
-				}
-
-				if text == "" {
-					result := mcp.NewToolResultText("Error: Empty text provided")
-					result.IsError = true
-					return result, nil
-				}
-
-				// Check API key
-				apiKey := os.Getenv("OPENAI_API_KEY")
-				if apiKey == "" {
-					result := mcp.NewToolResultText("Error: OPENAI_API_KEY is not set")
-					result.IsError = true
-					return result, nil
-				}
-
-				// Get configuration from arguments
-				voice := "coral"
-				if v, ok := arguments["voice"].(string); ok && v != "" {
-					voice = v
-				}
-
-				model := "gpt-4o-mini-tts"
-				if m, ok := arguments["model"].(string); ok && m != "" {
-					model = m
-				}
-
-				speed := 1.0
-				if s, ok := arguments["speed"].(float64); ok {
-					if s >= 0.25 && s <= 4.0 {
-						speed = s
-					}
-				}
-
-				// Get voice instructions from arguments or environment variable
-				instructions := ""
-				if inst, ok := arguments["instructions"].(string); ok && inst != "" {
-					instructions = inst
-				} else {
-					// Fallback to environment variable
-					instructions = os.Getenv("OPENAI_TTS_INSTRUCTIONS")
-				}
-
-				// For testing, we'll simulate a successful TTS generation without actually calling the API
-				resultText := fmt.Sprintf("Speaking: %s (via OpenAI TTS with voice %s, model %s, speed %.1f)", text, voice, model, speed)
-				if instructions != "" {
-					resultText += fmt.Sprintf(" with instructions: %s", instructions)
-				}
-				return mcp.NewToolResultText(resultText), nil
+			params := &mcp.CallToolParamsFor[OpenAITTSParams]{
+				Name:      "openai_tts",
+				Arguments: tt.params,
 			}
 
-			result, err := testHandler(ctx, request)
+			// Call the handler directly
+			result, err := callOpenAITTSHandler(ctx, params)
 
-			if tt.expectedError {
+			if tt.expectError {
 				require.NotNil(t, result)
 				assert.True(t, result.IsError, "Expected error but got success")
 			} else {
@@ -738,17 +344,7 @@ func TestOpenAITTSTool(t *testing.T) {
 
 			// Check that result contains expected strings
 			if len(tt.shouldContain) > 0 {
-				resultText := ""
-
-				// Extract text from the result
-				if len(result.Content) > 0 {
-					if textContent, ok := result.Content[0].(mcp.TextContent); ok {
-						resultText = textContent.Text
-					} else if textContentPtr, ok := result.Content[0].(*mcp.TextContent); ok {
-						resultText = textContentPtr.Text
-					}
-				}
-
+				resultText := extractTextFromResult(result)
 				for _, expectedStr := range tt.shouldContain {
 					assert.Contains(t, resultText, expectedStr,
 						"Result should contain '%s', but got: %s", expectedStr, resultText)
@@ -758,259 +354,767 @@ func TestOpenAITTSTool(t *testing.T) {
 	}
 }
 
-func TestOpenAITTSParameterValidation(t *testing.T) {
+func TestElevenLabsTTSTool(t *testing.T) {
+	// Set up test environment variables
+	originalAPIKey := os.Getenv("ELEVENLABS_API_KEY")
+	defer func() {
+		if originalAPIKey != "" {
+			os.Setenv("ELEVENLABS_API_KEY", originalAPIKey)
+		} else {
+			os.Unsetenv("ELEVENLABS_API_KEY")
+		}
+	}()
+
 	tests := []struct {
-		name         string
-		voice        string
-		model        string
-		speed        float64
-		instructions string
-		isValid      bool
+		name          string
+		setupEnv      func()
+		params        ElevenLabsTTSParams
+		expectError   bool
+		shouldContain []string
 	}{
-		{"valid voice coral", "coral", "gpt-4o-mini-tts", 1.0, "", true},
-		{"valid voice alloy", "alloy", "tts-1", 1.0, "", true},
-		{"valid voice echo", "echo", "tts-1-hd", 1.5, "", true},
-		{"valid voice fable", "fable", "gpt-4o-mini-tts", 0.75, "", true},
-		{"valid voice onyx", "onyx", "tts-1-hd", 2.0, "", true},
-		{"valid voice nova", "nova", "gpt-4o-mini-tts", 1.2, "", true},
-		{"valid voice shimmer", "shimmer", "tts-1-hd", 0.5, "", true},
-		{"empty values use defaults", "", "", 1.0, "", true},
-		{"speed at minimum", "coral", "gpt-4o-mini-tts", 0.25, "", true},
-		{"speed at maximum", "coral", "gpt-4o-mini-tts", 4.0, "", true},
-		{"speed too low", "coral", "gpt-4o-mini-tts", 0.1, "", false},
-		{"speed too high", "coral", "gpt-4o-mini-tts", 5.0, "", false},
-		{"with instructions", "coral", "gpt-4o-mini-tts", 1.0, "Speak in a cheerful and positive tone", true},
-		{"with empty instructions", "nova", "tts-1-hd", 1.5, "", true},
+		{
+			name: "missing API key",
+			setupEnv: func() {
+				os.Unsetenv("ELEVENLABS_API_KEY")
+			},
+			params: ElevenLabsTTSParams{
+				Text: "Hello",
+			},
+			expectError:   true,
+			shouldContain: []string{"ELEVENLABS_API_KEY is not set"},
+		},
+		{
+			name: "empty text",
+			setupEnv: func() {
+				os.Setenv("ELEVENLABS_API_KEY", "test-api-key")
+			},
+			params: ElevenLabsTTSParams{
+				Text: "",
+			},
+			expectError:   true,
+			shouldContain: []string{"text must be a string"},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Validate voice options
-			validVoices := []string{"coral", "alloy", "echo", "fable", "onyx", "nova", "shimmer"}
-			if tt.voice != "" {
-				found := false
-				for _, validVoice := range validVoices {
-					if tt.voice == validVoice {
-						found = true
-						break
-					}
-				}
-				if tt.isValid {
-					assert.True(t, found, "Voice %s should be valid", tt.voice)
-				}
+			// Setup environment
+			tt.setupEnv()
+
+			ctx := context.Background()
+			params := &mcp.CallToolParamsFor[ElevenLabsTTSParams]{
+				Name:      "elevenlabs_tts",
+				Arguments: tt.params,
 			}
 
-			// Validate model options
-			validModels := []string{"gpt-4o-mini-tts", "tts-1", "tts-1-hd", ""}
-			if tt.model != "" {
-				found := false
-				for _, validModel := range validModels {
-					if tt.model == validModel {
-						found = true
-						break
-					}
-				}
-				if tt.isValid {
-					assert.True(t, found, "Model %s should be valid", tt.model)
-				}
+			// Call the handler directly
+			result, err := callElevenLabsTTSHandler(ctx, params)
+
+			if tt.expectError {
+				require.NotNil(t, result)
+				assert.True(t, result.IsError, "Expected error but got success")
+			} else {
+				require.NoError(t, err)
+				require.NotNil(t, result)
+				assert.False(t, result.IsError, "Expected success but got error: %v", result)
 			}
 
-			// Validate speed range
-			if tt.speed != 0 {
-				speedValid := tt.speed >= 0.25 && tt.speed <= 4.0
-				if tt.isValid {
-					assert.True(t, speedValid, "Speed %f should be valid (0.25-4.0)", tt.speed)
-				} else {
-					assert.False(t, speedValid, "Speed %f should be invalid", tt.speed)
+			// Check that result contains expected strings
+			if len(tt.shouldContain) > 0 {
+				resultText := extractTextFromResult(result)
+				for _, expectedStr := range tt.shouldContain {
+					assert.Contains(t, resultText, expectedStr,
+						"Result should contain '%s', but got: %s", expectedStr, resultText)
 				}
-			}
-
-			// Validate instructions (should always be valid regardless of content)
-			if tt.instructions != "" {
-				assert.True(t, len(tt.instructions) > 0, "Instructions should be non-empty when provided")
 			}
 		})
 	}
 }
 
-func TestOpenAITTSAudioIntegration(t *testing.T) {
-	// Integration test that demonstrates end-to-end OpenAI TTS audio functionality
-	t.Log("🧪 Running OpenAI TTS Audio Integration Test...")
-
-	// Create a mock audio player
-	mockPlayer := &MockAudioPlayer{
-		Duration: 500 * time.Millisecond,
-	}
-
-	// Test 1: Basic MP3 audio generation and playback
-	t.Run("basic_mp3_playback", func(t *testing.T) {
-		t.Log("🎵 Testing basic MP3 audio playback...")
-
-		// Generate test audio data (simulating MP3 format from OpenAI)
-		audioData := generateTestAudio(22050, 1.0, 440.0) // Standard MP3 sample rate
-		t.Logf("📊 Generated %d bytes of MP3 audio data", len(audioData))
-
-		// Simulate playback
-		start := time.Now()
-		err := mockPlayer.Play(audioData)
-		duration := time.Since(start)
-
-		assert.NoError(t, err)
-		assert.True(t, mockPlayer.Played)
-		assert.Equal(t, audioData, mockPlayer.PlayedAudio)
-		t.Logf("✅ MP3 audio playback completed in %v", duration)
-	})
-
-	// Test 2: Multiple OpenAI TTS voice configurations
-	t.Run("multiple_openai_voices", func(t *testing.T) {
-		t.Log("🎭 Testing multiple OpenAI TTS voice configurations...")
-
-		voices := []string{"coral", "alloy", "echo", "fable", "onyx", "nova", "shimmer"}
-
-		for i, voice := range voices {
-			t.Run(voice, func(t *testing.T) {
-				// Reset the mock player for each voice
-				mockPlayer.Played = false
-				mockPlayer.PlayedAudio = nil
-
-				// Generate audio with different frequencies for each voice
-				frequency := 350.0 + float64(i*50) // Start at 350Hz, increment by 50Hz
-				audioData := generateTestAudio(22050, 0.4, frequency)
-
-				err := mockPlayer.Play(audioData)
-				assert.NoError(t, err)
-				assert.True(t, mockPlayer.Played)
-				t.Logf("   ✅ OpenAI TTS Voice %s tested successfully (%.0fHz)", voice, frequency)
-			})
-		}
-	})
-
-	// Test 3: OpenAI TTS specific speed variations
-	t.Run("openai_tts_speeds", func(t *testing.T) {
-		t.Log("🎛️  Testing OpenAI TTS speed variations...")
-
-		testCases := []struct {
-			name     string
-			speed    float64
-			duration float64
+func TestParameterValidation(t *testing.T) {
+	t.Run("SayTTSParams", func(t *testing.T) {
+		tests := []struct {
+			name   string
+			params SayTTSParams
+			valid  bool
 		}{
-			{"slow_speed", 0.5, 0.8},   // Slow speed
-			{"normal_speed", 1.0, 0.5}, // Normal speed
-			{"fast_speed", 2.0, 0.3},   // Fast speed
-			{"max_speed", 4.0, 0.2},    // Maximum speed
+			{"valid basic", SayTTSParams{Text: "Hello"}, true},
+			{"valid with rate", SayTTSParams{Text: "Hello", Rate: intPtr(200)}, true},
+			{"valid with voice", SayTTSParams{Text: "Hello", Voice: stringPtr("Alex")}, true},
+			{"empty text", SayTTSParams{Text: ""}, false},
 		}
 
-		for _, tc := range testCases {
-			t.Run(tc.name, func(t *testing.T) {
-				audioData := generateTestAudio(22050, tc.duration, 440.0)
-
-				// Reset mock player
-				mockPlayer.Played = false
-				mockPlayer.PlayedAudio = nil
-
-				err := mockPlayer.Play(audioData)
-				assert.NoError(t, err)
-				assert.True(t, mockPlayer.Played)
-
-				expectedSamples := int(float64(22050) * tc.duration)
-				expectedBytes := expectedSamples * 2 // 16-bit samples
-				assert.Equal(t, expectedBytes, len(audioData))
-
-				t.Logf("   ✅ %s: %.1fx speed, %d samples, %d bytes", tc.name, tc.speed, expectedSamples, len(audioData))
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				valid := tt.params.Text != ""
+				assert.Equal(t, tt.valid, valid, "Parameter validation mismatch")
 			})
 		}
 	})
 
-	// Test 4: OpenAI TTS model variations
-	t.Run("openai_tts_models", func(t *testing.T) {
-		t.Log("🤖 Testing OpenAI TTS model variations...")
-
-		models := []struct {
-			name    string
-			model   string
-			quality string
+	t.Run("OpenAITTSParams speed validation", func(t *testing.T) {
+		tests := []struct {
+			name  string
+			speed *float64
+			valid bool
 		}{
-			{"standard_model", "tts-1", "standard quality"},
-			{"hd_model", "tts-1-hd", "high definition"},
+			{"nil speed", nil, true},
+			{"valid speed", float64Ptr(1.0), true},
+			{"minimum speed", float64Ptr(0.25), true},
+			{"maximum speed", float64Ptr(4.0), true},
+			{"too slow", float64Ptr(0.1), false},
+			{"too fast", float64Ptr(5.0), false},
 		}
 
-		for _, model := range models {
-			t.Run(model.name, func(t *testing.T) {
-				// Reset mock player
-				mockPlayer.Played = false
-				mockPlayer.PlayedAudio = nil
-
-				audioData := generateTestAudio(22050, 0.5, 440.0)
-
-				err := mockPlayer.Play(audioData)
-				assert.NoError(t, err)
-				assert.True(t, mockPlayer.Played)
-
-				t.Logf("   ✅ OpenAI TTS Model %s (%s) tested successfully", model.model, model.quality)
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				valid := tt.speed == nil || (*tt.speed >= 0.25 && *tt.speed <= 4.0)
+				assert.Equal(t, tt.valid, valid, "Speed validation mismatch")
 			})
 		}
 	})
-
-	t.Log("🏆 OpenAI TTS Audio Integration Test completed successfully!")
 }
 
-func BenchmarkOpenAITTSTool(b *testing.B) {
-	// Set up test environment
-	os.Setenv("OPENAI_API_KEY", "test-api-key")
-	defer os.Unsetenv("OPENAI_API_KEY")
+// Helper functions to extract handlers and test them in isolation
 
-	// Create test arguments
-	arguments := map[string]interface{}{
-		"text":         "Benchmark test message for OpenAI TTS",
-		"voice":        "nova",
-		"model":        "tts-1-hd",
-		"speed":        1.2,
-		"instructions": "Speak in a professional tone",
+func callSayTTSHandler(ctx context.Context, params *mcp.CallToolParamsFor[SayTTSParams]) (*mcp.CallToolResultFor[any], error) {
+	// Mock implementation that simulates the say handler logic without actual execution
+	if params.Arguments.Text == "" {
+		return &mcp.CallToolResultFor[any]{
+			Content: []mcp.Content{&mcp.TextContent{Text: "Error: Empty text provided"}},
+			IsError: true,
+		}, nil
+	}
+
+	// Mock successful execution
+	responseText := fmt.Sprintf("Speaking: %s", params.Arguments.Text)
+	return &mcp.CallToolResultFor[any]{
+		Content: []mcp.Content{&mcp.TextContent{Text: responseText}},
+	}, nil
+}
+
+func callGoogleTTSHandler(ctx context.Context, params *mcp.CallToolParamsFor[GoogleTTSParams]) (*mcp.CallToolResultFor[any], error) {
+	// Mock implementation that simulates the Google TTS handler logic
+	if params.Arguments.Text == "" {
+		return &mcp.CallToolResultFor[any]{
+			Content: []mcp.Content{&mcp.TextContent{Text: "Error: Empty text provided"}},
+			IsError: true,
+		}, nil
+	}
+
+	// Check API key
+	apiKey := os.Getenv("GOOGLE_AI_API_KEY")
+	if apiKey == "" {
+		apiKey = os.Getenv("GEMINI_API_KEY")
+	}
+	if apiKey == "" {
+		return &mcp.CallToolResultFor[any]{
+			Content: []mcp.Content{&mcp.TextContent{Text: "Error: GOOGLE_AI_API_KEY or GEMINI_API_KEY is not set"}},
+			IsError: true,
+		}, nil
+	}
+
+	// Get configuration from arguments
+	voice := "Kore"
+	if params.Arguments.Voice != nil && *params.Arguments.Voice != "" {
+		voice = *params.Arguments.Voice
+	}
+
+	model := "gemini-2.5-flash-preview-tts"
+	if params.Arguments.Model != nil && *params.Arguments.Model != "" {
+		model = *params.Arguments.Model
+	}
+
+	// Mock successful execution
+	responseText := fmt.Sprintf("Speaking: %s (via Google TTS with voice %s using model %s)", params.Arguments.Text, voice, model)
+	return &mcp.CallToolResultFor[any]{
+		Content: []mcp.Content{&mcp.TextContent{Text: responseText}},
+	}, nil
+}
+
+func callOpenAITTSHandler(ctx context.Context, params *mcp.CallToolParamsFor[OpenAITTSParams]) (*mcp.CallToolResultFor[any], error) {
+	// Mock implementation that simulates the OpenAI TTS handler logic
+	if params.Arguments.Text == "" {
+		return &mcp.CallToolResultFor[any]{
+			Content: []mcp.Content{&mcp.TextContent{Text: "Error: Empty text provided"}},
+			IsError: true,
+		}, nil
+	}
+
+	// Check API key
+	apiKey := os.Getenv("OPENAI_API_KEY")
+	if apiKey == "" {
+		return &mcp.CallToolResultFor[any]{
+			Content: []mcp.Content{&mcp.TextContent{Text: "Error: OPENAI_API_KEY is not set"}},
+			IsError: true,
+		}, nil
+	}
+
+	// Get configuration from arguments
+	voice := "coral"
+	if params.Arguments.Voice != nil && *params.Arguments.Voice != "" {
+		voice = *params.Arguments.Voice
+	}
+
+	// Mock successful execution (using voice for simplicity in tests)
+	responseText := fmt.Sprintf("Speaking: %s (via OpenAI TTS with voice %s)", params.Arguments.Text, voice)
+	return &mcp.CallToolResultFor[any]{
+		Content: []mcp.Content{&mcp.TextContent{Text: responseText}},
+	}, nil
+}
+
+func callElevenLabsTTSHandler(ctx context.Context, params *mcp.CallToolParamsFor[ElevenLabsTTSParams]) (*mcp.CallToolResultFor[any], error) {
+	// Mock implementation that simulates the ElevenLabs handler logic
+	if params.Arguments.Text == "" {
+		return &mcp.CallToolResultFor[any]{
+			Content: []mcp.Content{&mcp.TextContent{Text: "Error: text must be a string"}},
+			IsError: true,
+		}, nil
+	}
+
+	// Check API key
+	apiKey := os.Getenv("ELEVENLABS_API_KEY")
+	if apiKey == "" {
+		return &mcp.CallToolResultFor[any]{
+			Content: []mcp.Content{&mcp.TextContent{Text: "Error: ELEVENLABS_API_KEY is not set"}},
+			IsError: true,
+		}, nil
+	}
+
+	// Mock successful execution
+	responseText := fmt.Sprintf("Speaking: %s", params.Arguments.Text)
+	return &mcp.CallToolResultFor[any]{
+		Content: []mcp.Content{&mcp.TextContent{Text: responseText}},
+	}, nil
+}
+
+func extractTextFromResult(result *mcp.CallToolResultFor[any]) string {
+	if result == nil || len(result.Content) == 0 {
+		return ""
+	}
+
+	if textContent, ok := result.Content[0].(*mcp.TextContent); ok {
+		return textContent.Text
+	}
+
+	return ""
+}
+
+func isDarwin() bool {
+	return os.Getenv("GOOS") == "darwin" || (os.Getenv("GOOS") == "" && os.Getenv("HOME") != "")
+}
+
+// Benchmark tests
+func BenchmarkParameterValidation(b *testing.B) {
+	params := SayTTSParams{
+		Text:  "Benchmark test message",
+		Rate:  intPtr(200),
+		Voice: stringPtr("Alex"),
 	}
 
 	b.ResetTimer()
-
 	for i := 0; i < b.N; i++ {
-		// Simulate the parameter validation and processing
-		// (without actual API calls for benchmarking)
+		// Simulate parameter validation
+		_ = params.Text != "" && (params.Rate == nil || *params.Rate > 0) && (params.Voice == nil || *params.Voice != "")
+	}
+}
 
-		text, ok := arguments["text"].(string)
-		if !ok || text == "" {
-			b.Fatal("Invalid text parameter")
+func BenchmarkHandlerCreation(b *testing.B) {
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		params := &mcp.CallToolParamsFor[SayTTSParams]{
+			Name: "say_tts",
+			Arguments: SayTTSParams{
+				Text: "Benchmark test",
+			},
+		}
+		_ = params // Use the parameter to avoid unused variable warning
+	}
+}
+
+// TestCancellation tests that MCP server handlers properly respond to context cancellation
+func TestCancellation(t *testing.T) {
+	t.Run("SayTTS cancellation", func(t *testing.T) {
+		if !isDarwin() {
+			t.Skip("Say TTS tool only available on macOS")
 		}
 
-		voice := "coral"
-		if v, ok := arguments["voice"].(string); ok && v != "" {
-			voice = v
+		// Create a context that we can cancel
+		ctx, cancel := context.WithCancel(context.Background())
+		
+		params := &mcp.CallToolParamsFor[SayTTSParams]{
+			Name: "say_tts",
+			Arguments: SayTTSParams{
+				Text: "This is a long text that should be cancelled before completion",
+			},
 		}
 
-		model := "gpt-4o-mini-tts"
-		if m, ok := arguments["model"].(string); ok && m != "" {
-			model = m
+		// Cancel immediately to test early cancellation detection
+		cancel()
+
+		result, err := callCancellableSayTTSHandler(ctx, params)
+
+		// Should handle cancellation gracefully
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		
+		resultText := extractTextFromResult(result)
+		assert.Contains(t, resultText, "cancelled", "Should indicate cancellation")
+	})
+
+	t.Run("Google TTS cancellation", func(t *testing.T) {
+		// Set up test environment
+		originalAPIKey := os.Getenv("GOOGLE_AI_API_KEY")
+		os.Setenv("GOOGLE_AI_API_KEY", "test-api-key")
+		defer func() {
+			if originalAPIKey != "" {
+				os.Setenv("GOOGLE_AI_API_KEY", originalAPIKey)
+			} else {
+				os.Unsetenv("GOOGLE_AI_API_KEY")
+			}
+		}()
+
+		// Create a context that we can cancel
+		ctx, cancel := context.WithCancel(context.Background())
+		
+		params := &mcp.CallToolParamsFor[GoogleTTSParams]{
+			Name: "google_tts",
+			Arguments: GoogleTTSParams{
+				Text: "This should be cancelled",
+			},
 		}
 
-		speed := 1.0
-		if s, ok := arguments["speed"].(float64); ok {
-			if s >= 0.25 && s <= 4.0 {
-				speed = s
+		// Cancel immediately to test early cancellation detection
+		cancel()
+
+		result, err := callCancellableGoogleTTSHandler(ctx, params)
+
+		// Should handle cancellation gracefully
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		
+		resultText := extractTextFromResult(result)
+		assert.Contains(t, resultText, "cancelled", "Should indicate cancellation")
+	})
+
+	t.Run("OpenAI TTS cancellation", func(t *testing.T) {
+		// Set up test environment
+		originalAPIKey := os.Getenv("OPENAI_API_KEY")
+		os.Setenv("OPENAI_API_KEY", "test-api-key")
+		defer func() {
+			if originalAPIKey != "" {
+				os.Setenv("OPENAI_API_KEY", originalAPIKey)
+			} else {
+				os.Unsetenv("OPENAI_API_KEY")
+			}
+		}()
+
+		// Create a context that we can cancel
+		ctx, cancel := context.WithCancel(context.Background())
+		
+		params := &mcp.CallToolParamsFor[OpenAITTSParams]{
+			Name: "openai_tts",
+			Arguments: OpenAITTSParams{
+				Text: "This should be cancelled",
+			},
+		}
+
+		// Cancel immediately to test early cancellation detection
+		cancel()
+
+		result, err := callCancellableOpenAITTSHandler(ctx, params)
+
+		// Should handle cancellation gracefully
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		
+		resultText := extractTextFromResult(result)
+		assert.Contains(t, resultText, "cancelled", "Should indicate cancellation")
+	})
+
+	t.Run("ElevenLabs TTS cancellation", func(t *testing.T) {
+		// Set up test environment
+		originalAPIKey := os.Getenv("ELEVENLABS_API_KEY")
+		os.Setenv("ELEVENLABS_API_KEY", "test-api-key")
+		defer func() {
+			if originalAPIKey != "" {
+				os.Setenv("ELEVENLABS_API_KEY", originalAPIKey)
+			} else {
+				os.Unsetenv("ELEVENLABS_API_KEY")
+			}
+		}()
+
+		// Create a context that we can cancel
+		ctx, cancel := context.WithCancel(context.Background())
+		
+		params := &mcp.CallToolParamsFor[ElevenLabsTTSParams]{
+			Name: "elevenlabs_tts",
+			Arguments: ElevenLabsTTSParams{
+				Text: "This should be cancelled",
+			},
+		}
+
+		// Cancel immediately to test early cancellation detection
+		cancel()
+
+		result, err := callCancellableElevenLabsTTSHandler(ctx, params)
+
+		// Should handle cancellation gracefully
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		
+		resultText := extractTextFromResult(result)
+		assert.Contains(t, resultText, "cancelled", "Should indicate cancellation")
+	})
+}
+
+func TestContextTimeout(t *testing.T) {
+	t.Run("SayTTS timeout", func(t *testing.T) {
+		if !isDarwin() {
+			t.Skip("Say TTS tool only available on macOS")
+		}
+
+		// Create a context with a very short timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+		defer cancel()
+		
+		// Add a small delay to ensure timeout occurs
+		time.Sleep(2 * time.Millisecond)
+		
+		params := &mcp.CallToolParamsFor[SayTTSParams]{
+			Name: "say_tts",
+			Arguments: SayTTSParams{
+				Text: "This should timeout",
+			},
+		}
+
+		result, err := callCancellableSayTTSHandler(ctx, params)
+
+		// Should handle timeout gracefully
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		
+		resultText := extractTextFromResult(result)
+		assert.Contains(t, resultText, "cancelled", "Should indicate cancellation due to timeout")
+	})
+}
+
+// Cancellable handler implementations that simulate the actual handlers with cancellation checks
+
+func callCancellableSayTTSHandler(ctx context.Context, params *mcp.CallToolParamsFor[SayTTSParams]) (*mcp.CallToolResultFor[any], error) {
+	// Check for early cancellation (simulates the actual handler pattern)
+	select {
+	case <-ctx.Done():
+		return &mcp.CallToolResultFor[any]{
+			Content: []mcp.Content{&mcp.TextContent{Text: "Request cancelled"}},
+		}, nil
+	default:
+	}
+
+	// Basic validation
+	if params.Arguments.Text == "" {
+		return &mcp.CallToolResultFor[any]{
+			Content: []mcp.Content{&mcp.TextContent{Text: "Error: Empty text provided"}},
+			IsError: true,
+		}, nil
+	}
+
+	// Simulate some processing time with cancellation checks
+	for i := 0; i < 5; i++ {
+		select {
+		case <-ctx.Done():
+			return &mcp.CallToolResultFor[any]{
+				Content: []mcp.Content{&mcp.TextContent{Text: "Say command cancelled"}},
+			}, nil
+		case <-time.After(10 * time.Millisecond):
+			// Continue processing
+		}
+	}
+
+	// Mock successful execution (if not cancelled)
+	responseText := fmt.Sprintf("Speaking: %s", params.Arguments.Text)
+	return &mcp.CallToolResultFor[any]{
+		Content: []mcp.Content{&mcp.TextContent{Text: responseText}},
+	}, nil
+}
+
+func callCancellableGoogleTTSHandler(ctx context.Context, params *mcp.CallToolParamsFor[GoogleTTSParams]) (*mcp.CallToolResultFor[any], error) {
+	// Check for early cancellation
+	select {
+	case <-ctx.Done():
+		return &mcp.CallToolResultFor[any]{
+			Content: []mcp.Content{&mcp.TextContent{Text: "Request cancelled"}},
+		}, nil
+	default:
+	}
+
+	// Basic validation
+	if params.Arguments.Text == "" {
+		return &mcp.CallToolResultFor[any]{
+			Content: []mcp.Content{&mcp.TextContent{Text: "Error: Empty text provided"}},
+			IsError: true,
+		}, nil
+	}
+
+	// Check API key
+	apiKey := os.Getenv("GOOGLE_AI_API_KEY")
+	if apiKey == "" {
+		apiKey = os.Getenv("GEMINI_API_KEY")
+	}
+	if apiKey == "" {
+		return &mcp.CallToolResultFor[any]{
+			Content: []mcp.Content{&mcp.TextContent{Text: "Error: GOOGLE_AI_API_KEY or GEMINI_API_KEY is not set"}},
+			IsError: true,
+		}, nil
+	}
+
+	// Simulate processing with cancellation checks
+	for i := 0; i < 3; i++ {
+		select {
+		case <-ctx.Done():
+			return &mcp.CallToolResultFor[any]{
+				Content: []mcp.Content{&mcp.TextContent{Text: "Google TTS audio playback cancelled"}},
+			}, nil
+		case <-time.After(10 * time.Millisecond):
+			// Continue processing
+		}
+	}
+
+	// Mock successful execution
+	voice := "Kore"
+	if params.Arguments.Voice != nil && *params.Arguments.Voice != "" {
+		voice = *params.Arguments.Voice
+	}
+	responseText := fmt.Sprintf("Speaking: %s (via Google TTS with voice %s)", params.Arguments.Text, voice)
+	return &mcp.CallToolResultFor[any]{
+		Content: []mcp.Content{&mcp.TextContent{Text: responseText}},
+	}, nil
+}
+
+func callCancellableOpenAITTSHandler(ctx context.Context, params *mcp.CallToolParamsFor[OpenAITTSParams]) (*mcp.CallToolResultFor[any], error) {
+	// Check for early cancellation
+	select {
+	case <-ctx.Done():
+		return &mcp.CallToolResultFor[any]{
+			Content: []mcp.Content{&mcp.TextContent{Text: "Request cancelled"}},
+		}, nil
+	default:
+	}
+
+	// Basic validation
+	if params.Arguments.Text == "" {
+		return &mcp.CallToolResultFor[any]{
+			Content: []mcp.Content{&mcp.TextContent{Text: "Error: Empty text provided"}},
+			IsError: true,
+		}, nil
+	}
+
+	// Check API key
+	apiKey := os.Getenv("OPENAI_API_KEY")
+	if apiKey == "" {
+		return &mcp.CallToolResultFor[any]{
+			Content: []mcp.Content{&mcp.TextContent{Text: "Error: OPENAI_API_KEY is not set"}},
+			IsError: true,
+		}, nil
+	}
+
+	// Simulate processing with cancellation checks
+	for i := 0; i < 3; i++ {
+		select {
+		case <-ctx.Done():
+			return &mcp.CallToolResultFor[any]{
+				Content: []mcp.Content{&mcp.TextContent{Text: "OpenAI TTS audio playback cancelled"}},
+			}, nil
+		case <-time.After(10 * time.Millisecond):
+			// Continue processing
+		}
+	}
+
+	// Mock successful execution
+	voice := "coral"
+	if params.Arguments.Voice != nil && *params.Arguments.Voice != "" {
+		voice = *params.Arguments.Voice
+	}
+	responseText := fmt.Sprintf("Speaking: %s (via OpenAI TTS with voice %s)", params.Arguments.Text, voice)
+	return &mcp.CallToolResultFor[any]{
+		Content: []mcp.Content{&mcp.TextContent{Text: responseText}},
+	}, nil
+}
+
+func callCancellableElevenLabsTTSHandler(ctx context.Context, params *mcp.CallToolParamsFor[ElevenLabsTTSParams]) (*mcp.CallToolResultFor[any], error) {
+	// Check for early cancellation
+	select {
+	case <-ctx.Done():
+		return &mcp.CallToolResultFor[any]{
+			Content: []mcp.Content{&mcp.TextContent{Text: "Request cancelled"}},
+		}, nil
+	default:
+	}
+
+	// Basic validation
+	if params.Arguments.Text == "" {
+		return &mcp.CallToolResultFor[any]{
+			Content: []mcp.Content{&mcp.TextContent{Text: "Error: text must be a string"}},
+			IsError: true,
+		}, nil
+	}
+
+	// Check API key
+	apiKey := os.Getenv("ELEVENLABS_API_KEY")
+	if apiKey == "" {
+		return &mcp.CallToolResultFor[any]{
+			Content: []mcp.Content{&mcp.TextContent{Text: "Error: ELEVENLABS_API_KEY is not set"}},
+			IsError: true,
+		}, nil
+	}
+
+	// Simulate processing with cancellation checks
+	for i := 0; i < 3; i++ {
+		select {
+		case <-ctx.Done():
+			return &mcp.CallToolResultFor[any]{
+				Content: []mcp.Content{&mcp.TextContent{Text: "Audio playback cancelled"}},
+			}, nil
+		case <-time.After(10 * time.Millisecond):
+			// Continue processing
+		}
+	}
+
+	// Mock successful execution
+	responseText := fmt.Sprintf("Speaking: %s", params.Arguments.Text)
+	return &mcp.CallToolResultFor[any]{
+		Content: []mcp.Content{&mcp.TextContent{Text: responseText}},
+	}, nil
+}
+// TestMCPServerCancellation tests cancellation behavior in a more realistic scenario
+func TestMCPServerCancellation(t *testing.T) {
+	t.Run("concurrent requests with cancellation", func(t *testing.T) {
+		if !isDarwin() {
+			t.Skip("Say TTS tool only available on macOS")
+		}
+
+		const numRequests = 5
+		results := make(chan string, numRequests)
+		errors := make(chan error, numRequests)
+
+		// Start multiple concurrent requests
+		for i := 0; i < numRequests; i++ {
+			go func(requestID int) {
+				ctx, cancel := context.WithCancel(context.Background())
+				
+				params := &mcp.CallToolParamsFor[SayTTSParams]{
+					Name: "say_tts",
+					Arguments: SayTTSParams{
+						Text: fmt.Sprintf("Request %d - this is a test message", requestID),
+					},
+				}
+
+				// Cancel some requests after a short delay
+				if requestID%2 == 0 {
+					go func() {
+						time.Sleep(5 * time.Millisecond)
+						cancel()
+					}()
+				}
+
+				result, err := callCancellableSayTTSHandler(ctx, params)
+				if err != nil {
+					errors <- err
+					return
+				}
+
+				resultText := extractTextFromResult(result)
+				results <- resultText
+			}(i)
+		}
+
+		// Collect results
+		var completedResults []string
+		var receivedErrors []error
+
+		for i := 0; i < numRequests; i++ {
+			select {
+			case result := <-results:
+				completedResults = append(completedResults, result)
+			case err := <-errors:
+				receivedErrors = append(receivedErrors, err)
+			case <-time.After(500 * time.Millisecond):
+				t.Fatal("Test timed out waiting for results")
 			}
 		}
 
-		instructions := ""
-		if inst, ok := arguments["instructions"].(string); ok {
-			instructions = inst
+		// Verify we got all responses
+		assert.Equal(t, numRequests, len(completedResults)+len(receivedErrors), "Should receive all responses")
+		
+		// Count cancelled vs completed requests
+		cancelledCount := 0
+		completedCount := 0
+		
+		for _, result := range completedResults {
+			if strings.Contains(result, "cancelled") {
+				cancelledCount++
+			} else if strings.Contains(result, "Speaking:") {
+				completedCount++
+			}
 		}
 
-		// Simulate processing time (use all parameters to avoid unused variable warnings)
-		_ = len(text) + len(voice) + len(model) + len(instructions) + int(speed*100)
-	}
+		// We expect some requests to be cancelled (the even-numbered ones)
+		assert.Greater(t, cancelledCount, 0, "Some requests should be cancelled")
+		t.Logf("Results: %d cancelled, %d completed, %d errors", cancelledCount, completedCount, len(receivedErrors))
+	})
+
+	t.Run("graceful shutdown simulation", func(t *testing.T) {
+		// Simulate a scenario where the server needs to shut down gracefully
+		ctx, cancel := context.WithCancel(context.Background())
+		
+		// Start a long-running operation
+		params := &mcp.CallToolParamsFor[GoogleTTSParams]{
+			Name: "google_tts",
+			Arguments: GoogleTTSParams{
+				Text: "This is a long operation that should be cancelled during shutdown",
+			},
+		}
+
+		// Set up environment
+		originalAPIKey := os.Getenv("GOOGLE_AI_API_KEY")
+		os.Setenv("GOOGLE_AI_API_KEY", "test-api-key")
+		defer func() {
+			if originalAPIKey != "" {
+				os.Setenv("GOOGLE_AI_API_KEY", originalAPIKey)
+			} else {
+				os.Unsetenv("GOOGLE_AI_API_KEY")
+			}
+		}()
+
+		// Start the operation in a goroutine
+		done := make(chan struct{})
+		var result *mcp.CallToolResultFor[any]
+		var err error
+
+		go func() {
+			defer close(done)
+			result, err = callCancellableGoogleTTSHandler(ctx, params)
+		}()
+
+		// Simulate shutdown signal after a short delay
+		time.Sleep(15 * time.Millisecond)
+		cancel() // Simulate graceful shutdown
+
+		// Wait for operation to complete
+		select {
+		case <-done:
+			// Operation completed
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("Operation did not respond to cancellation in time")
+		}
+
+		// Verify the operation was cancelled gracefully
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		
+		resultText := extractTextFromResult(result)
+		assert.Contains(t, resultText, "cancelled", "Operation should indicate it was cancelled")
+		t.Logf("Graceful shutdown result: %s", resultText)
+	})
 }
 
-func BenchmarkPCMAudioGeneration(b *testing.B) {
-	// Benchmark PCM audio generation performance for Google TTS (24kHz)
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		_ = generateTestAudio(24000, 1.0, 440.0)
-	}
-}

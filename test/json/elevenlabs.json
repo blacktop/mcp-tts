@@ -1,1 +1,2 @@
+{"jsonrpc":"2.0","id":1,"params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"example-client","version":"1.0.0"},"capabilities":{}},"method":"initialize"}
 {"jsonrpc":"2.0","id":4,"params":{"name":"elevenlabs_tts","arguments":{"text":"Hello, world! Wanna hear a joke? Knock knock... to get to the other side. ha HA!"}},"method":"tools/call"}

@@ -32,7 +32,6 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-	"strconv"
 	"time"
 
 	"github.com/caarlos0/ctrlc"
@@ -41,8 +40,7 @@ import (
 	"github.com/gopxl/beep/v2"
 	"github.com/gopxl/beep/v2/mp3"
 	"github.com/gopxl/beep/v2/speaker"
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 	"github.com/spf13/cobra"
@@ -55,11 +53,34 @@ var (
 	logger  *log.Logger
 	// Version stores the service's version
 	Version string
-	// Global cancellation manager
-	cancellationManager *CancellationManager
 	// Flag to suppress "Speaking:" output
 	suppressSpeakingOutput bool
 )
+
+// Parameter types for tools with MCP schema descriptions for LLMs
+type SayTTSParams struct {
+	Text  string  `json:"text" mcp:"The text to speak aloud"`
+	Rate  *int    `json:"rate,omitempty" mcp:"Speech rate in words per minute (50-500, default: 200)"`
+	Voice *string `json:"voice,omitempty" mcp:"Voice to use for speech synthesis (e.g. 'Alex', 'Samantha', 'Victoria')"`
+}
+
+type ElevenLabsTTSParams struct {
+	Text string `json:"text" mcp:"The text to convert to speech using ElevenLabs API"`
+}
+
+type GoogleTTSParams struct {
+	Text  string  `json:"text" mcp:"The text to convert to speech using Google TTS"`
+	Voice *string `json:"voice,omitempty" mcp:"Voice name to use (e.g. 'Kore', 'Aoede', 'Fenrir', default: 'Kore')"`
+	Model *string `json:"model,omitempty" mcp:"TTS model to use (default: 'gemini-2.5-flash-preview-tts')"`
+}
+
+type OpenAITTSParams struct {
+	Text         string  `json:"text" mcp:"The text to convert to speech using OpenAI TTS"`
+	Voice        *string `json:"voice,omitempty" mcp:"Voice to use (alloy, echo, fable, onyx, nova, shimmer, coral, default: 'coral')"`
+	Model        *string `json:"model,omitempty" mcp:"TTS model to use (gpt-4o-mini-tts, gpt-4o-audio-preview, default: 'gpt-4o-mini-tts')"`
+	Speed        *float64 `json:"speed,omitempty" mcp:"Speech speed (0.25-4.0, default: 1.0)"`
+	Instructions *string `json:"instructions,omitempty" mcp:"Instructions for voice modulation and style"`
+}
 
 func init() {
 	// Override the default error level style.
@@ -78,7 +99,7 @@ func init() {
 	// Define CLI flags
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose debug logging")
 	rootCmd.PersistentFlags().BoolVar(&suppressSpeakingOutput, "suppress-speaking-output", false, "Suppress 'Speaking:' text output")
-	
+
 	// Check environment variable for suppressing output
 	if os.Getenv("MCP_TTS_SUPPRESS_SPEAKING_OUTPUT") == "true" {
 		suppressSpeakingOutput = true
@@ -108,140 +129,67 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			log.SetLevel(log.DebugLevel)
 		}
 
-		// Initialize cancellation manager
-		cancellationManager = NewCancellationManager()
-
-		// Ensure proper shutdown of cancellation manager
-		defer func() {
-			if cancellationManager != nil {
-				cancellationManager.Shutdown()
-			}
-		}()
 
 		// Create a new MCP server
-		s := server.NewMCPServer(
-			"Say TTS Service",
-			Version,
-			server.WithPromptCapabilities(true),
-			server.WithToolCapabilities(true),
-			server.WithLogging(),
-		)
+		impl := &mcp.Implementation{
+			Name:    "Say TTS Service",
+			Version: Version,
+		}
+		s := mcp.NewServer(impl, nil)
 
-		s.AddPrompt(mcp.NewPrompt("say",
-			mcp.WithPromptDescription("Speaks the provided text out loud using the macOS text-to-speech engine"),
-			mcp.WithArgument("text",
-				mcp.RequiredArgument(),
-				mcp.ArgumentDescription("The text to be spoken"),
-			),
-			mcp.WithArgument("rate",
-				mcp.ArgumentDescription("The rate at which the text is spoken (words per minute)"),
-			),
-			mcp.WithArgument("voice",
-				mcp.ArgumentDescription("The voice to use for speech"),
-			),
-		), func(ctx context.Context, request mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
-			text := request.Params.Arguments["text"]
-			if text == "" {
-				return nil, fmt.Errorf("text is required")
-			}
-
-			args := []string{}
-
-			// Add rate if provided
-			if rate := request.Params.Arguments["rate"]; rate != "" {
-				rateInt, _ := strconv.Atoi(rate)
-				args = append(args, "--rate", fmt.Sprintf("%d", rateInt))
-			} else {
-				args = append(args, "--rate", "200") // Default rate
-			}
-
-			// Add voice if provided
-			if voice := request.Params.Arguments["voice"]; voice != "" {
-				args = append(args, "--voice", voice)
-			}
-
-			args = append(args, text)
-
-			// Execute the say command
-			sayCmd := exec.Command("/usr/bin/say", args...)
-			if err := sayCmd.Start(); err != nil {
-				return nil, fmt.Errorf("failed to start say command: %v", err)
-			}
-
-			var content string
-			if suppressSpeakingOutput {
-				content = "Speech completed"
-			} else {
-				content = fmt.Sprintf("Speaking: %s", text)
-			}
-			
-			return mcp.NewGetPromptResult(
-				"Speaking text",
-				[]mcp.PromptMessage{
-					mcp.NewPromptMessage(
-						mcp.RoleUser,
-						mcp.NewTextContent(content),
-					),
-				},
-			), nil
-		})
+		// Prompt functionality removed - focusing on tools with new SDK
 
 		if runtime.GOOS == "darwin" {
 			// Add the "say_tts" tool
-			sayTool := mcp.NewTool("say_tts",
-				mcp.WithDescription("Speaks the provided text out loud using the macOS text-to-speech engine"),
-				mcp.WithString("text",
-					mcp.Required(),
-					mcp.Description("The text to be spoken"),
-				),
-				mcp.WithNumber("rate",
-					mcp.Description("The rate at which the text is spoken (words per minute)"),
-				),
-				mcp.WithString("voice",
-					mcp.Description("The voice to use for speech"),
-				),
-			)
+			sayTool := &mcp.Tool{
+				Name:        "say_tts",
+				Description: "Speaks the provided text out loud using the macOS text-to-speech engine",
+			}
 
 			// Add the say tool handler
-			s.AddTool(sayTool, WithCancellation(func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-				log.Debug("Say tool called", "request", request)
-				arguments := request.GetArguments()
-				text, ok := arguments["text"].(string)
-				if !ok {
-					result := mcp.NewToolResultText("Error: text must be a string")
-					result.IsError = true
-					return result, nil
+			mcp.AddTool(s, sayTool, func(ctx context.Context, cc *mcp.ServerSession, params *mcp.CallToolParamsFor[SayTTSParams]) (*mcp.CallToolResultFor[any], error) {
+				// Check for early cancellation
+				select {
+				case <-ctx.Done():
+					return &mcp.CallToolResultFor[any]{
+						Content: []mcp.Content{&mcp.TextContent{Text: "Request cancelled"}},
+					}, nil
+				default:
+				}
+				
+				log.Debug("Say tool called", "params", params.Arguments)
+				
+				text := params.Arguments.Text
+				if text == "" {
+					return &mcp.CallToolResultFor[any]{
+						Content: []mcp.Content{&mcp.TextContent{Text: "Error: Empty text provided"}},
+						IsError: true,
+					}, nil
 				}
 
 				args := []string{}
 
 				// Add rate if provided
-				if rate, ok := arguments["rate"].(float64); ok {
-					args = append(args, "--rate", fmt.Sprintf("%d", int(rate)))
+				if params.Arguments.Rate != nil {
+					args = append(args, "--rate", fmt.Sprintf("%d", *params.Arguments.Rate))
 				} else {
 					args = append(args, "--rate", "200") // Default rate
 				}
 
 				// Add voice if provided and validate it
-				if voice, ok := arguments["voice"].(string); ok && voice != "" {
+				if params.Arguments.Voice != nil && *params.Arguments.Voice != "" {
+					voice := *params.Arguments.Voice
 					// Simple validation to prevent command injection
 					// Only allow alphanumeric characters, spaces, and some common punctuation
 					for _, r := range voice {
 						if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r == ' ' || r == '(' || r == ')') {
-							result := mcp.NewToolResultText(fmt.Sprintf("Error: Voice contains invalid characters: %s", voice))
-							result.IsError = true
-							return result, nil
+							return &mcp.CallToolResultFor[any]{
+								Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("Error: Voice contains invalid characters: %s", voice)}},
+								IsError: true,
+							}, nil
 						}
 					}
 					args = append(args, "--voice", voice)
-				}
-
-				// Text is passed as a separate argument, not through shell, which provides some safety
-				// but we'll still do basic validation
-				if text == "" {
-					result := mcp.NewToolResultText("Error: Empty text provided")
-					result.IsError = true
-					return result, nil
 				}
 
 				// Check for potentially dangerous shell metacharacters
@@ -264,9 +212,10 @@ Designed to be used with the MCP (Model Context Protocol).`,
 				sayCmd := exec.CommandContext(ctx, "/usr/bin/say", args...)
 				if err := sayCmd.Start(); err != nil {
 					log.Error("Failed to start say command", "error", err)
-					result := mcp.NewToolResultText(fmt.Sprintf("Error: Failed to start say command: %v", err))
-					result.IsError = true
-					return result, nil
+					return &mcp.CallToolResultFor[any]{
+						Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("Error: Failed to start say command: %v", err)}},
+						IsError: true,
+					}, nil
 				}
 
 				// Wait for command completion or cancellation in a goroutine
@@ -280,42 +229,58 @@ Designed to be used with the MCP (Model Context Protocol).`,
 					if err != nil {
 						if ctx.Err() == context.Canceled {
 							log.Info("Say command cancelled by user")
-							return mcp.NewToolResultText("Say command cancelled"), nil
+							return &mcp.CallToolResultFor[any]{
+								Content: []mcp.Content{&mcp.TextContent{Text: "Say command cancelled"}},
+							}, nil
 						}
 						log.Error("Say command failed", "error", err)
-						result := mcp.NewToolResultText(fmt.Sprintf("Error: Say command failed: %v", err))
-						result.IsError = true
-						return result, nil
+						return &mcp.CallToolResultFor[any]{
+							Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("Error: Say command failed: %v", err)}},
+							IsError: true,
+						}, nil
 					}
 					log.Info("Speaking text completed", "text", text)
+					var responseText string
 					if suppressSpeakingOutput {
-						return mcp.NewToolResultText("Speech completed"), nil
+						responseText = "Speech completed"
+					} else {
+						responseText = fmt.Sprintf("Speaking: %s", text)
 					}
-					return mcp.NewToolResultText(fmt.Sprintf("Speaking: %s", text)), nil
+					return &mcp.CallToolResultFor[any]{
+						Content: []mcp.Content{&mcp.TextContent{Text: responseText}},
+					}, nil
 				case <-ctx.Done():
 					log.Info("Say command cancelled by user")
 					// The CommandContext will handle killing the process
-					return mcp.NewToolResultText("Say command cancelled"), nil
+					return &mcp.CallToolResultFor[any]{
+						Content: []mcp.Content{&mcp.TextContent{Text: "Say command cancelled"}},
+					}, nil
 				}
-			}))
+			})
 		}
 
-		elevenLabsTool := mcp.NewTool("elevenlabs_tts",
-			mcp.WithDescription("Uses the ElevenLabs API to generate speech from text"),
-			mcp.WithString("text",
-				mcp.Required(),
-				mcp.Description("The text to be spoken"),
-			),
-		)
+		elevenLabsTool := &mcp.Tool{
+			Name:        "elevenlabs_tts",
+			Description: "Uses the ElevenLabs API to generate speech from text",
+		}
 
-		s.AddTool(elevenLabsTool, WithCancellation(func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			log.Debug("ElevenLabs tool called", "request", request)
-			arguments := request.GetArguments()
-			text, ok := arguments["text"].(string)
-			if !ok {
-				result := mcp.NewToolResultText("Error: text must be a string")
-				result.IsError = true
-				return result, nil
+		mcp.AddTool(s, elevenLabsTool, func(ctx context.Context, cc *mcp.ServerSession, params *mcp.CallToolParamsFor[ElevenLabsTTSParams]) (*mcp.CallToolResultFor[any], error) {
+			// Check for early cancellation
+			select {
+			case <-ctx.Done():
+				return &mcp.CallToolResultFor[any]{
+					Content: []mcp.Content{&mcp.TextContent{Text: "Request cancelled"}},
+				}, nil
+			default:
+			}
+			
+			log.Debug("ElevenLabs tool called", "params", params.Arguments)
+			text := params.Arguments.Text
+			if text == "" {
+				return &mcp.CallToolResultFor[any]{
+					Content: []mcp.Content{&mcp.TextContent{Text: "Error: text must be a string"}},
+					IsError: true,
+				}, nil
 			}
 
 			voiceID := os.Getenv("ELEVENLABS_VOICE_ID")
@@ -333,7 +298,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			apiKey := os.Getenv("ELEVENLABS_API_KEY")
 			if apiKey == "" {
 				log.Error("ELEVENLABS_API_KEY not set")
-				result := mcp.NewToolResultText("Error: ELEVENLABS_API_KEY is not set")
+				result := &mcp.CallToolResultFor[any]{Content: []mcp.Content{&mcp.TextContent{Text: "Error: ELEVENLABS_API_KEY is not set"}}}
 				result.IsError = true
 				return result, nil
 			}
@@ -425,14 +390,14 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			case err := <-statusValidated:
 				if err != nil {
 					log.Error("HTTP request failed", "error", err)
-					result := mcp.NewToolResultText(fmt.Sprintf("Error: %v", err))
+					result := &mcp.CallToolResultFor[any]{Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("Error: %v", err)}}}
 					result.IsError = true
 					return result, nil
 				}
 				log.Debug("HTTP status validated successfully, proceeding to decode")
 			case <-ctx.Done():
 				log.Error("Context cancelled while waiting for HTTP status validation")
-				result := mcp.NewToolResultText("Error: Request cancelled")
+				result := &mcp.CallToolResultFor[any]{Content: []mcp.Content{&mcp.TextContent{Text: "Error: Request cancelled"}}}
 				result.IsError = true
 				return result, nil
 			}
@@ -479,18 +444,18 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			case err := <-audioComplete:
 				if err != nil && err != context.Canceled {
 					log.Error("Audio playback failed", "error", err)
-					result := mcp.NewToolResultText(fmt.Sprintf("Error: %v", err))
+					result := &mcp.CallToolResultFor[any]{Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("Error: %v", err)}}}
 					result.IsError = true
 					return result, nil
 				}
 				if err == context.Canceled {
 					log.Info("Audio playback cancelled by user")
-					return mcp.NewToolResultText("Audio playback cancelled"), nil
+					return &mcp.CallToolResultFor[any]{Content: []mcp.Content{&mcp.TextContent{Text: "Audio playback cancelled"}}}, nil
 				}
 			case <-ctx.Done():
 				log.Info("Request cancelled, stopping all operations")
 				speaker.Clear()
-				return mcp.NewToolResultText("Request cancelled"), nil
+				return &mcp.CallToolResultFor[any]{Content: []mcp.Content{&mcp.TextContent{Text: "Request cancelled"}}}, nil
 			}
 
 			log.Debug("Finished speaking")
@@ -498,57 +463,51 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			// Check for any errors that occurred during streaming
 			if err := g.Wait(); err != nil && err != context.Canceled {
 				log.Error("Error occurred during streaming", "error", err)
-				result := mcp.NewToolResultText(fmt.Sprintf("Error: %v", err))
+				result := &mcp.CallToolResultFor[any]{Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("Error: %v", err)}}}
 				result.IsError = true
 				return result, nil
 			}
 
 			if suppressSpeakingOutput {
-				return mcp.NewToolResultText("Speech completed"), nil
+				return &mcp.CallToolResultFor[any]{Content: []mcp.Content{&mcp.TextContent{Text: "Speech completed"}}}, nil
 			}
-			return mcp.NewToolResultText(fmt.Sprintf("Speaking: %s", text)), nil
-		}))
+			return &mcp.CallToolResultFor[any]{Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("Speaking: %s", text)}}}, nil
+		})
 
 		// Add Google TTS tool
-		googleTTSTool := mcp.NewTool("google_tts",
-			mcp.WithDescription("Uses Google's dedicated Text-to-Speech API with Gemini TTS models"),
-			mcp.WithString("text",
-				mcp.Required(),
-				mcp.Description("The text message to convert to speech"),
-			),
-			mcp.WithString("voice",
-				mcp.Description("Voice name: Zephyr, Puck, Charon, Kore, Fenrir, Aoede, Leda, Orus, etc. (default: Kore)"),
-			),
-			mcp.WithString("model",
-				mcp.Description("TTS model: gemini-2.5-flash-preview-tts, gemini-2.5-pro-preview-tts (default: gemini-2.5-flash-preview-tts)"),
-			),
-		)
+		googleTTSTool := &mcp.Tool{
+			Name:        "google_tts",
+			Description: "Uses Google's dedicated Text-to-Speech API with Gemini TTS models",
+		}
 
-		s.AddTool(googleTTSTool, WithCancellation(func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			log.Debug("Google TTS tool called", "request", request)
-			arguments := request.GetArguments()
-			text, ok := arguments["text"].(string)
-			if !ok {
-				result := mcp.NewToolResultText("Error: text must be a string")
-				result.IsError = true
-				return result, nil
+		mcp.AddTool(s, googleTTSTool, func(ctx context.Context, cc *mcp.ServerSession, params *mcp.CallToolParamsFor[GoogleTTSParams]) (*mcp.CallToolResultFor[any], error) {
+			// Check for early cancellation
+			select {
+			case <-ctx.Done():
+				return &mcp.CallToolResultFor[any]{
+					Content: []mcp.Content{&mcp.TextContent{Text: "Request cancelled"}},
+				}, nil
+			default:
 			}
-
+			
+			log.Debug("Google TTS tool called", "params", params.Arguments)
+			text := params.Arguments.Text
 			if text == "" {
-				result := mcp.NewToolResultText("Error: Empty text provided")
-				result.IsError = true
-				return result, nil
+				return &mcp.CallToolResultFor[any]{
+					Content: []mcp.Content{&mcp.TextContent{Text: "Error: Empty text provided"}},
+					IsError: true,
+				}, nil
 			}
 
 			// Get configuration from arguments
 			voice := "Kore"
-			if v, ok := arguments["voice"].(string); ok && v != "" {
-				voice = v
+			if params.Arguments.Voice != nil && *params.Arguments.Voice != "" {
+				voice = *params.Arguments.Voice
 			}
 
 			model := "gemini-2.5-flash-preview-tts"
-			if m, ok := arguments["model"].(string); ok && m != "" {
-				model = m
+			if params.Arguments.Model != nil && *params.Arguments.Model != "" {
+				model = *params.Arguments.Model
 			}
 
 			// Get API key from environment
@@ -558,7 +517,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			}
 			if apiKey == "" {
 				log.Error("GOOGLE_AI_API_KEY or GEMINI_API_KEY not set")
-				result := mcp.NewToolResultText("Error: GOOGLE_AI_API_KEY or GEMINI_API_KEY is not set")
+				result := &mcp.CallToolResultFor[any]{Content: []mcp.Content{&mcp.TextContent{Text: "Error: GOOGLE_AI_API_KEY or GEMINI_API_KEY is not set"}}}
 				result.IsError = true
 				return result, nil
 			}
@@ -570,7 +529,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			})
 			if err != nil {
 				log.Error("Failed to create Google AI client", "error", err)
-				result := mcp.NewToolResultText(fmt.Sprintf("Error: Failed to create client: %v", err))
+				result := &mcp.CallToolResultFor[any]{Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("Error: Failed to create client: %v", err)}}}
 				result.IsError = true
 				return result, nil
 			}
@@ -598,7 +557,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			})
 			if err != nil {
 				log.Error("Failed to generate TTS audio", "error", err)
-				result := mcp.NewToolResultText(fmt.Sprintf("Error: Failed to generate TTS audio: %v", err))
+				result := &mcp.CallToolResultFor[any]{Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("Error: Failed to generate TTS audio: %v", err)}}}
 				result.IsError = true
 				return result, nil
 			}
@@ -606,7 +565,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			// Extract audio data from response
 			if len(response.Candidates) == 0 || len(response.Candidates[0].Content.Parts) == 0 {
 				log.Error("No audio data in TTS response")
-				result := mcp.NewToolResultText("Error: No audio data received from Google TTS")
+				result := &mcp.CallToolResultFor[any]{Content: []mcp.Content{&mcp.TextContent{Text: "Error: No audio data received from Google TTS"}}}
 				result.IsError = true
 				return result, nil
 			}
@@ -614,7 +573,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			part := response.Candidates[0].Content.Parts[0]
 			if part.InlineData == nil {
 				log.Error("No inline data in TTS response")
-				result := mcp.NewToolResultText("Error: No audio data received from Google TTS")
+				result := &mcp.CallToolResultFor[any]{Content: []mcp.Content{&mcp.TextContent{Text: "Error: No audio data received from Google TTS"}}}
 				result.IsError = true
 				return result, nil
 			}
@@ -645,78 +604,66 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			case <-done:
 				log.Debug("Google TTS audio playback completed normally")
 				if suppressSpeakingOutput {
-					return mcp.NewToolResultText("Speech completed"), nil
+					return &mcp.CallToolResultFor[any]{Content: []mcp.Content{&mcp.TextContent{Text: "Speech completed"}}}, nil
 				}
-				return mcp.NewToolResultText(fmt.Sprintf("Speaking: %s (via Google TTS with voice %s)", text, voice)), nil
+				return &mcp.CallToolResultFor[any]{Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("Speaking: %s (via Google TTS with voice %s)", text, voice)}}}, nil
 			case <-ctx.Done():
 				log.Debug("Context cancelled, stopping Google TTS audio playback")
 				speaker.Clear()
 				log.Info("Google TTS audio playback cancelled by user")
-				return mcp.NewToolResultText("Google TTS audio playback cancelled"), nil
+				return &mcp.CallToolResultFor[any]{Content: []mcp.Content{&mcp.TextContent{Text: "Google TTS audio playback cancelled"}}}, nil
 			}
-		}))
+		})
 
 		// Add OpenAI TTS tool
-		openaiTTSTool := mcp.NewTool("openai_tts",
-			mcp.WithDescription("Uses OpenAI's Text-to-Speech API to generate speech from text"),
-			mcp.WithString("text",
-				mcp.Required(),
-				mcp.Description("The text to be spoken"),
-			),
-			mcp.WithString("voice",
-				mcp.Description("Voice to use: coral, alloy, echo, fable, onyx, nova, shimmer (default: coral)"),
-			),
-			mcp.WithString("model",
-				mcp.Description("TTS model: gpt-4o-mini-tts, tts-1, tts-1-hd (default: gpt-4o-mini-tts)"),
-			),
-			mcp.WithNumber("speed",
-				mcp.Description("Speed of speech from 0.25 to 4.0 (default: 1.0)"),
-			),
-			mcp.WithString("instructions",
-				mcp.Description("Custom voice instructions (e.g., 'Speak in a cheerful and positive tone'). Can be set via OPENAI_TTS_INSTRUCTIONS env var"),
-			),
-		)
+		openaiTTSTool := &mcp.Tool{
+			Name:        "openai_tts",
+			Description: "Uses OpenAI's Text-to-Speech API to generate speech from text",
+		}
 
-		s.AddTool(openaiTTSTool, WithCancellation(func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			log.Debug("OpenAI TTS tool called", "request", request)
-			arguments := request.GetArguments()
-			text, ok := arguments["text"].(string)
-			if !ok {
-				result := mcp.NewToolResultText("Error: text must be a string")
-				result.IsError = true
-				return result, nil
+		mcp.AddTool(s, openaiTTSTool, func(ctx context.Context, cc *mcp.ServerSession, params *mcp.CallToolParamsFor[OpenAITTSParams]) (*mcp.CallToolResultFor[any], error) {
+			// Check for early cancellation
+			select {
+			case <-ctx.Done():
+				return &mcp.CallToolResultFor[any]{
+					Content: []mcp.Content{&mcp.TextContent{Text: "Request cancelled"}},
+				}, nil
+			default:
 			}
-
+			
+			log.Debug("OpenAI TTS tool called", "params", params.Arguments)
+			text := params.Arguments.Text
 			if text == "" {
-				result := mcp.NewToolResultText("Error: Empty text provided")
-				result.IsError = true
-				return result, nil
+				return &mcp.CallToolResultFor[any]{
+					Content: []mcp.Content{&mcp.TextContent{Text: "Error: Empty text provided"}},
+					IsError: true,
+				}, nil
 			}
 
 			// Get configuration from arguments
 			voice := "coral"
-			if v, ok := arguments["voice"].(string); ok && v != "" {
-				voice = v
+			if params.Arguments.Voice != nil && *params.Arguments.Voice != "" {
+				voice = *params.Arguments.Voice
 			}
 
 			model := "gpt-4o-mini-tts"
-			if m, ok := arguments["model"].(string); ok && m != "" {
-				model = m
+			if params.Arguments.Model != nil && *params.Arguments.Model != "" {
+				model = *params.Arguments.Model
 			}
 
 			speed := 1.0
-			if s, ok := arguments["speed"].(float64); ok {
-				if s >= 0.25 && s <= 4.0 {
-					speed = s
+			if params.Arguments.Speed != nil {
+				if *params.Arguments.Speed >= 0.25 && *params.Arguments.Speed <= 4.0 {
+					speed = *params.Arguments.Speed
 				} else {
-					log.Warn("Speed out of range, using default", "provided", s, "default", 1.0)
+					log.Warn("Speed out of range, using default", "provided", *params.Arguments.Speed, "default", 1.0)
 				}
 			}
 
 			// Get voice instructions from arguments or environment variable
 			instructions := ""
-			if inst, ok := arguments["instructions"].(string); ok && inst != "" {
-				instructions = inst
+			if params.Arguments.Instructions != nil && *params.Arguments.Instructions != "" {
+				instructions = *params.Arguments.Instructions
 			} else {
 				// Fallback to environment variable
 				instructions = os.Getenv("OPENAI_TTS_INSTRUCTIONS")
@@ -731,7 +678,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			apiKey := os.Getenv("OPENAI_API_KEY")
 			if apiKey == "" {
 				log.Error("OPENAI_API_KEY not set")
-				result := mcp.NewToolResultText("Error: OPENAI_API_KEY is not set")
+				result := &mcp.CallToolResultFor[any]{Content: []mcp.Content{&mcp.TextContent{Text: "Error: OPENAI_API_KEY is not set"}}}
 				result.IsError = true
 				return result, nil
 			}
@@ -751,22 +698,22 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			log.Debug("Generating OpenAI TTS audio", logFields...)
 
 			// Generate TTS audio
-			params := openai.AudioSpeechNewParams{
+			reqParams := openai.AudioSpeechNewParams{
 				Model: openai.SpeechModel(model),
 				Input: text,
 				Voice: openai.AudioSpeechNewParamsVoice(voice),
 			}
 			if speed != 1.0 {
-				params.Speed = openai.Float(speed)
+				reqParams.Speed = openai.Float(speed)
 			}
 			if instructions != "" {
-				params.Instructions = openai.String(instructions)
+				reqParams.Instructions = openai.String(instructions)
 			}
 
-			response, err := client.Audio.Speech.New(ctx, params)
+			response, err := client.Audio.Speech.New(ctx, reqParams)
 			if err != nil {
 				log.Error("Failed to generate OpenAI TTS audio", "error", err)
-				result := mcp.NewToolResultText(fmt.Sprintf("Error: Failed to generate TTS audio: %v", err))
+				result := &mcp.CallToolResultFor[any]{Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("Error: Failed to generate TTS audio: %v", err)}}}
 				result.IsError = true
 				return result, nil
 			}
@@ -777,7 +724,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			streamer, format, err := mp3.Decode(response.Body)
 			if err != nil {
 				log.Error("Failed to decode OpenAI TTS response", "error", err)
-				result := mcp.NewToolResultText(fmt.Sprintf("Error: Failed to decode response: %v", err))
+				result := &mcp.CallToolResultFor[any]{Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("Error: Failed to decode response: %v", err)}}}
 				result.IsError = true
 				return result, nil
 			}
@@ -801,16 +748,16 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			case <-done:
 				log.Debug("OpenAI TTS audio playback completed normally")
 				if suppressSpeakingOutput {
-					return mcp.NewToolResultText("Speech completed"), nil
+					return &mcp.CallToolResultFor[any]{Content: []mcp.Content{&mcp.TextContent{Text: "Speech completed"}}}, nil
 				}
-				return mcp.NewToolResultText(fmt.Sprintf("Speaking: %s (via OpenAI TTS with voice %s)", text, voice)), nil
+				return &mcp.CallToolResultFor[any]{Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("Speaking: %s (via OpenAI TTS with voice %s)", text, voice)}}}, nil
 			case <-ctx.Done():
 				log.Debug("Context cancelled, stopping OpenAI TTS audio playback")
 				speaker.Clear()
 				log.Info("OpenAI TTS audio playback cancelled by user")
-				return mcp.NewToolResultText("OpenAI TTS audio playback cancelled"), nil
+				return &mcp.CallToolResultFor[any]{Content: []mcp.Content{&mcp.TextContent{Text: "OpenAI TTS audio playback cancelled"}}}, nil
 			}
-		}))
+		})
 
 		log.Info("Starting MCP server", "name", "Say TTS Service", "version", Version)
 		// Start the server using stdin/stdout
@@ -818,7 +765,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 		defer cancel()
 
 		if err := ctrlc.Default.Run(ctx, func() error {
-			if err := server.ServeStdio(s); err != nil {
+			if err := s.Run(ctx, mcp.NewStdioTransport()); err != nil {
 				return fmt.Errorf("failed to serve MCP: %v", err)
 			}
 			return nil

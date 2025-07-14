@@ -29,3 +29,10 @@ dist/
 .DS_Store
 completions/
 mcp-tts
+
+# AI
+.claude
+CLAUDE*.md
+.gemini
+GEMINI*.md
+
