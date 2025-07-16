@@ -144,6 +144,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			sayTool := &mcp.Tool{
 				Name:        "say_tts",
 				Description: "Speaks the provided text out loud using the macOS text-to-speech engine",
+				InputSchema: buildSayTTSSchema(),
 			}
 
 			// Add the say tool handler
@@ -263,6 +264,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 		elevenLabsTool := &mcp.Tool{
 			Name:        "elevenlabs_tts",
 			Description: "Uses the ElevenLabs API to generate speech from text",
+			InputSchema: buildElevenLabsTTSSchema(),
 		}
 
 		mcp.AddTool(s, elevenLabsTool, func(ctx context.Context, cc *mcp.ServerSession, params *mcp.CallToolParamsFor[ElevenLabsTTSParams]) (*mcp.CallToolResultFor[any], error) {
@@ -479,6 +481,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 		googleTTSTool := &mcp.Tool{
 			Name:        "google_tts",
 			Description: "Uses Google's dedicated Text-to-Speech API with Gemini TTS models",
+			InputSchema: buildGoogleTTSSchema(),
 		}
 
 		mcp.AddTool(s, googleTTSTool, func(ctx context.Context, cc *mcp.ServerSession, params *mcp.CallToolParamsFor[GoogleTTSParams]) (*mcp.CallToolResultFor[any], error) {
@@ -620,6 +623,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 		openaiTTSTool := &mcp.Tool{
 			Name:        "openai_tts",
 			Description: "Uses OpenAI's Text-to-Speech API to generate speech from text",
+			InputSchema: buildOpenAITTSSchema(),
 		}
 
 		mcp.AddTool(s, openaiTTSTool, func(ctx context.Context, cc *mcp.ServerSession, params *mcp.CallToolParamsFor[OpenAITTSParams]) (*mcp.CallToolResultFor[any], error) {
