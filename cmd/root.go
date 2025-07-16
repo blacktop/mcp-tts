@@ -180,9 +180,10 @@ Designed to be used with the MCP (Model Context Protocol).`,
 				if params.Arguments.Voice != nil && *params.Arguments.Voice != "" {
 					voice := *params.Arguments.Voice
 					// Simple validation to prevent command injection
-					// Only allow alphanumeric characters, spaces, and some common punctuation
+					// Allow alphanumeric characters, spaces, hyphens, underscores, and parentheses
 					for _, r := range voice {
-						if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r == ' ' || r == '(' || r == ')') {
+						if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || 
+							r == ' ' || r == '(' || r == ')' || r == '-' || r == '_') {
 							return &mcp.CallToolResultFor[any]{
 								Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("Error: Voice contains invalid characters: %s", voice)}},
 								IsError: true,

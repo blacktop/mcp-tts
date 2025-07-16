@@ -79,6 +79,33 @@ func TestSayTTSTool(t *testing.T) {
 			shouldContain: []string{"Speaking:", "Testing custom voice"},
 		},
 		{
+			name: "with voice containing parentheses",
+			params: SayTTSParams{
+				Text:  "Testing voice with parentheses",
+				Voice: stringPtr("Daniel (English (UK))"),
+			},
+			expectError:   false,
+			shouldContain: []string{"Speaking:", "Testing voice with parentheses"},
+		},
+		{
+			name: "with voice containing underscore",
+			params: SayTTSParams{
+				Text:  "Testing voice with underscore",
+				Voice: stringPtr("en_US"),
+			},
+			expectError:   false,
+			shouldContain: []string{"Speaking:", "Testing voice with underscore"},
+		},
+		{
+			name: "with voice containing hyphen",
+			params: SayTTSParams{
+				Text:  "Testing voice with hyphen",
+				Voice: stringPtr("Eddy (English (UK))"),
+			},
+			expectError:   false,
+			shouldContain: []string{"Speaking:", "Testing voice with hyphen"},
+		},
+		{
 			name: "empty text",
 			params: SayTTSParams{
 				Text: "",
