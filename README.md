@@ -44,15 +44,18 @@ Uses Google's [Gemini TTS models](https://ai.google.dev/gemini-api/docs/speech-g
 
 ### `openai_tts`
 
-Uses OpenAI's [Text-to-Speech API](https://platform.openai.com/docs/guides/text-to-speech) to speak the text with 6 natural-sounding voices:
+Uses OpenAI's [Text-to-Speech API](https://platform.openai.com/docs/guides/text-to-speech) to speak the text with 10 natural-sounding voices:
 
-- **coral** (Default, warm and natural)
-- **alloy** (Balanced tone)
-- **echo** (Warm and engaging)  
-- **fable** (Expressive and storytelling)
-- **onyx** (Deep and resonant)
-- **nova** (Bright and articulate)
-- **shimmer** (Smooth and pleasant)
+- **alloy** (Warm, conversational, modern)
+- **ash** (Confident, assertive, slightly textured)
+- **ballad** (Gentle, melodious, slightly lyrical)
+- **coral** (Cheerful, fresh, upbeat)
+- **echo** (Neutral, calm, balanced)
+- **fable** (Storyteller-like, expressive)
+- **nova** (Clear, precise, slightly formal)
+- **onyx** (Deep, authoritative, resonant)
+- **sage** (Soothing, empathetic, reassuring)
+- **shimmer** (Bright, animated, playful)
 
 Supports three quality models:
 - **gpt-4o-mini-tts** - Default, optimized quality and speed
