@@ -75,11 +75,11 @@ type GoogleTTSParams struct {
 }
 
 type OpenAITTSParams struct {
-	Text         string  `json:"text" mcp:"The text to convert to speech using OpenAI TTS"`
-	Voice        *string `json:"voice,omitempty" mcp:"Voice to use (alloy, echo, fable, onyx, nova, shimmer, coral, default: 'coral')"`
-	Model        *string `json:"model,omitempty" mcp:"TTS model to use (gpt-4o-mini-tts, gpt-4o-audio-preview, default: 'gpt-4o-mini-tts')"`
+	Text         string   `json:"text" mcp:"The text to convert to speech using OpenAI TTS"`
+	Voice        *string  `json:"voice,omitempty" mcp:"Voice to use (alloy, echo, fable, onyx, nova, shimmer, coral, default: 'alloy')"`
+	Model        *string  `json:"model,omitempty" mcp:"TTS model to use (gpt-4o-mini-tts, gpt-4o-audio-preview, default: 'gpt-4o-mini-tts')"`
 	Speed        *float64 `json:"speed,omitempty" mcp:"Speech speed (0.25-4.0, default: 1.0)"`
-	Instructions *string `json:"instructions,omitempty" mcp:"Instructions for voice modulation and style"`
+	Instructions *string  `json:"instructions,omitempty" mcp:"Instructions for voice modulation and style"`
 }
 
 func init() {
@@ -129,7 +129,6 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			log.SetLevel(log.DebugLevel)
 		}
 
-
 		// Create a new MCP server
 		impl := &mcp.Implementation{
 			Name:    "Say TTS Service",
@@ -157,9 +156,9 @@ Designed to be used with the MCP (Model Context Protocol).`,
 					}, nil
 				default:
 				}
-				
+
 				log.Debug("Say tool called", "params", params.Arguments)
-				
+
 				text := params.Arguments.Text
 				if text == "" {
 					return &mcp.CallToolResultFor[any]{
@@ -183,7 +182,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 					// Simple validation to prevent command injection
 					// Allow alphanumeric characters, spaces, hyphens, underscores, and parentheses
 					for _, r := range voice {
-						if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || 
+						if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
 							r == ' ' || r == '(' || r == ')' || r == '-' || r == '_') {
 							return &mcp.CallToolResultFor[any]{
 								Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("Error: Voice contains invalid characters: %s", voice)}},
@@ -276,7 +275,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 				}, nil
 			default:
 			}
-			
+
 			log.Debug("ElevenLabs tool called", "params", params.Arguments)
 			text := params.Arguments.Text
 			if text == "" {
@@ -493,7 +492,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 				}, nil
 			default:
 			}
-			
+
 			log.Debug("Google TTS tool called", "params", params.Arguments)
 			text := params.Arguments.Text
 			if text == "" {
@@ -635,7 +634,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 				}, nil
 			default:
 			}
-			
+
 			log.Debug("OpenAI TTS tool called", "params", params.Arguments)
 			text := params.Arguments.Text
 			if text == "" {
@@ -646,7 +645,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			}
 
 			// Get configuration from arguments
-			voice := "coral"
+			voice := "alloy"
 			if params.Arguments.Voice != nil && *params.Arguments.Voice != "" {
 				voice = *params.Arguments.Voice
 			}

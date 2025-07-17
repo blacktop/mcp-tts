@@ -81,7 +81,7 @@ func buildOpenAITTSSchema() *jsonschema.Schema {
 			},
 			"voice": {
 				Type:        "string",
-				Description: "Voice to use (alloy, ash, ballad, coral, echo, fable, nova, onyx, sage, shimmer, default: 'coral')",
+				Description: "Voice to use (alloy, ash, ballad, coral, echo, fable, nova, onyx, sage, shimmer, default: 'alloy')",
 				Enum:        []any{"alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"},
 			},
 			"model": {
