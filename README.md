@@ -56,6 +56,7 @@ Uses OpenAI's [Text-to-Speech API](https://platform.openai.com/docs/guides/text-
 - **onyx** (Deep, authoritative, resonant)
 - **sage** (Soothing, empathetic, reassuring)
 - **shimmer** (Bright, animated, playful)
+- **verse** (Versatile, expressive)
 
 Supports three quality models:
 - **gpt-4o-mini-tts** - Default, optimized quality and speed

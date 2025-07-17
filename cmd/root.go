@@ -76,8 +76,8 @@ type GoogleTTSParams struct {
 
 type OpenAITTSParams struct {
 	Text         string   `json:"text" mcp:"The text to convert to speech using OpenAI TTS"`
-	Voice        *string  `json:"voice,omitempty" mcp:"Voice to use (alloy, echo, fable, onyx, nova, shimmer, coral, default: 'alloy')"`
-	Model        *string  `json:"model,omitempty" mcp:"TTS model to use (gpt-4o-mini-tts, gpt-4o-audio-preview, default: 'gpt-4o-mini-tts')"`
+	Voice        *string  `json:"voice,omitempty" mcp:"Voice to use (alloy, ash, ballad, coral, echo, fable, nova, onyx, sage, shimmer, verse; default: 'alloy')"`
+	Model        *string  `json:"model,omitempty" mcp:"TTS model to use (gpt-4o-mini-tts, gpt-4o-audio-preview; default: 'gpt-4o-mini-tts')"`
 	Speed        *float64 `json:"speed,omitempty" mcp:"Speech speed (0.25-4.0, default: 1.0)"`
 	Instructions *string  `json:"instructions,omitempty" mcp:"Instructions for voice modulation and style"`
 }
