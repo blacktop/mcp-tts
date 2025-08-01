@@ -69,6 +69,24 @@ Additional features:
 
 ## Configuration
 
+### Sequential vs Concurrent TTS
+
+By default, the TTS server enforces sequential speech operations - only one TTS request can play audio at a time. This prevents multiple agents from speaking simultaneously and creating an unintelligible cacophony. Subsequent requests will wait in a queue until the current speech completes.
+
+To allow concurrent TTS operations (multiple speeches playing simultaneously):
+
+**Environment Variable:**
+```bash
+export MCP_TTS_ALLOW_CONCURRENT=true
+```
+
+**Command Line Flag:**
+```bash
+mcp-tts --sequential-tts=false
+```
+
+> **Note:** Concurrent TTS may result in overlapping audio that's difficult to understand. Use this option only when you explicitly want multiple TTS operations to run simultaneously.
+
 ### Suppressing "Speaking:" Output
 
 By default, TTS tools return a message like "Speaking: [text]" when speech completes. This can interfere with LLM responses. To suppress this output:
@@ -115,6 +133,7 @@ Usage:
 
 Flags:
   -h, --help                       help for mcp-tts
+      --sequential-tts             Enforce sequential TTS (prevent concurrent speech) (default true)
       --suppress-speaking-output   Suppress 'Speaking:' text output
   -v, --verbose                    Enable verbose debug logging
 ```
@@ -132,7 +151,8 @@ Flags:
         "GOOGLE_AI_API_KEY": "********",
         "OPENAI_API_KEY": "********",
         "OPENAI_TTS_INSTRUCTIONS": "Speak in a cheerful and positive tone",
-        "MCP_TTS_SUPPRESS_SPEAKING_OUTPUT": "true"
+        "MCP_TTS_SUPPRESS_SPEAKING_OUTPUT": "true",
+        "MCP_TTS_ALLOW_CONCURRENT": "false"
       }
     }
   }
@@ -146,6 +166,8 @@ Flags:
 - `GOOGLE_AI_API_KEY` or `GEMINI_API_KEY`: Your Google AI API key (required for `google_tts`)
 - `OPENAI_API_KEY`: Your OpenAI API key (required for `openai_tts`)
 - `OPENAI_TTS_INSTRUCTIONS`: Custom voice instructions for OpenAI TTS (optional, e.g., "Speak in a cheerful and positive tone")
+- `MCP_TTS_SUPPRESS_SPEAKING_OUTPUT`: Set to "true" to suppress "Speaking:" output (optional)
+- `MCP_TTS_ALLOW_CONCURRENT`: Set to "true" to allow concurrent TTS operations (optional, defaults to sequential)
 
 ### Test
 
@@ -191,6 +213,15 @@ Flags:
 {"jsonrpc":"2.0","id":5,"result":{"content":[{"type":"text","text":"Speaking: Hello! This is a test of OpenAI's text-to-speech API. I'm using the nova voice at 1.2x speed. (via OpenAI TTS with voice nova)"}]}}
 ```
 
+#### Test the mutex behavior with multiple TTS requests
+
+```bash
+# Sequential mode (default) - speeches play one after another
+cat test/sequential.json | go run main.go --verbose
+
+# Concurrent mode - allows overlapping speech  
+cat test/sequential.json | go run main.go --verbose --sequential-tts=false
+```
 
 ## License
 

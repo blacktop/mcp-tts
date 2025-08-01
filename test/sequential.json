@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{"sampling":{}},"clientInfo":{"name":"test-client","version":"1.0.0"}}}
+{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"say_tts","arguments":{"text":"First agent reporting: Analysis complete","rate":300}}}
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"say_tts","arguments":{"text":"Second agent reporting: Processing finished","rate":300}}}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"say_tts","arguments":{"text":"Third agent reporting: Summary ready","rate":300}}}

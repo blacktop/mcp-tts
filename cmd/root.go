@@ -32,6 +32,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/caarlos0/ctrlc"
@@ -55,7 +56,46 @@ var (
 	Version string
 	// Flag to suppress "Speaking:" output
 	suppressSpeakingOutput bool
+	// Global TTS mutex to prevent concurrent speech
+	ttsMutex sync.Mutex
+	// Flag to enable/disable sequential TTS (default: true)
+	sequentialTTS bool = true
 )
+
+// acquireTTSLock attempts to acquire the TTS mutex with context support
+// Returns a release function that should be deferred
+func acquireTTSLock(ctx context.Context) (release func(), err error) {
+	if !sequentialTTS {
+		// If concurrent TTS is allowed, return a no-op release function
+		return func() {}, nil
+	}
+	
+	// Create a channel to signal when we've acquired the lock
+	acquired := make(chan struct{})
+	
+	go func() {
+		ttsMutex.Lock()
+		close(acquired)
+	}()
+	
+	// Wait for either lock acquisition or context cancellation
+	select {
+	case <-acquired:
+		// We got the lock
+		return func() { ttsMutex.Unlock() }, nil
+	case <-ctx.Done():
+		// Context was cancelled while waiting
+		// We need to check if we actually got the lock
+		select {
+		case <-acquired:
+			// We got the lock after context was cancelled, release it
+			ttsMutex.Unlock()
+		default:
+			// We never got the lock
+		}
+		return nil, ctx.Err()
+	}
+}
 
 // Parameter types for tools with MCP schema descriptions for LLMs
 type SayTTSParams struct {
@@ -99,10 +139,16 @@ func init() {
 	// Define CLI flags
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose debug logging")
 	rootCmd.PersistentFlags().BoolVar(&suppressSpeakingOutput, "suppress-speaking-output", false, "Suppress 'Speaking:' text output")
+	rootCmd.PersistentFlags().BoolVar(&sequentialTTS, "sequential-tts", true, "Enforce sequential TTS (prevent concurrent speech)")
 
 	// Check environment variable for suppressing output
 	if os.Getenv("MCP_TTS_SUPPRESS_SPEAKING_OUTPUT") == "true" {
 		suppressSpeakingOutput = true
+	}
+	
+	// Check environment variable for concurrent TTS
+	if os.Getenv("MCP_TTS_ALLOW_CONCURRENT") == "true" {
+		sequentialTTS = false
 	}
 }
 
@@ -127,6 +173,13 @@ Designed to be used with the MCP (Model Context Protocol).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if verbose {
 			log.SetLevel(log.DebugLevel)
+		}
+		
+		// Log sequential TTS status
+		if sequentialTTS {
+			log.Debug("Sequential TTS enabled - only one speech operation at a time")
+		} else {
+			log.Debug("Concurrent TTS enabled - multiple speech operations allowed simultaneously")
 		}
 
 		// Create a new MCP server
@@ -156,6 +209,16 @@ Designed to be used with the MCP (Model Context Protocol).`,
 					}, nil
 				default:
 				}
+
+				// Acquire TTS lock
+				release, err := acquireTTSLock(ctx)
+				if err != nil {
+					log.Info("Request cancelled while waiting for TTS lock")
+					return &mcp.CallToolResultFor[any]{
+						Content: []mcp.Content{&mcp.TextContent{Text: "Request cancelled while waiting for TTS"}},
+					}, nil
+				}
+				defer release()
 
 				log.Debug("Say tool called", "params", params.Arguments)
 
@@ -275,6 +338,16 @@ Designed to be used with the MCP (Model Context Protocol).`,
 				}, nil
 			default:
 			}
+
+			// Acquire TTS lock
+			release, err := acquireTTSLock(ctx)
+			if err != nil {
+				log.Info("Request cancelled while waiting for TTS lock")
+				return &mcp.CallToolResultFor[any]{
+					Content: []mcp.Content{&mcp.TextContent{Text: "Request cancelled while waiting for TTS"}},
+				}, nil
+			}
+			defer release()
 
 			log.Debug("ElevenLabs tool called", "params", params.Arguments)
 			text := params.Arguments.Text
@@ -493,6 +566,16 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			default:
 			}
 
+			// Acquire TTS lock
+			release, err := acquireTTSLock(ctx)
+			if err != nil {
+				log.Info("Request cancelled while waiting for TTS lock")
+				return &mcp.CallToolResultFor[any]{
+					Content: []mcp.Content{&mcp.TextContent{Text: "Request cancelled while waiting for TTS"}},
+				}, nil
+			}
+			defer release()
+
 			log.Debug("Google TTS tool called", "params", params.Arguments)
 			text := params.Arguments.Text
 			if text == "" {
@@ -634,6 +717,16 @@ Designed to be used with the MCP (Model Context Protocol).`,
 				}, nil
 			default:
 			}
+
+			// Acquire TTS lock
+			release, err := acquireTTSLock(ctx)
+			if err != nil {
+				log.Info("Request cancelled while waiting for TTS lock")
+				return &mcp.CallToolResultFor[any]{
+					Content: []mcp.Content{&mcp.TextContent{Text: "Request cancelled while waiting for TTS"}},
+				}, nil
+			}
+			defer release()
 
 			log.Debug("OpenAI TTS tool called", "params", params.Arguments)
 			text := params.Arguments.Text
