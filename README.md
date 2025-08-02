@@ -73,6 +73,8 @@ Additional features:
 
 By default, the TTS server enforces sequential speech operations - only one TTS request can play audio at a time. This prevents multiple agents from speaking simultaneously and creating an unintelligible cacophony. Subsequent requests will wait in a queue until the current speech completes.
 
+**Multi-Instance Protection**: The mutex works both within a single MCP server process and across multiple Claude Desktop instances. When running multiple Claude Desktop terminals, they coordinate via a system-wide file lock to prevent overlapping speech.
+
 To allow concurrent TTS operations (multiple speeches playing simultaneously):
 
 **Environment Variable:**

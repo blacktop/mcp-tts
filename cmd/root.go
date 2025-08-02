@@ -69,29 +69,38 @@ func acquireTTSLock(ctx context.Context) (release func(), err error) {
 		// If concurrent TTS is allowed, return a no-op release function
 		return func() {}, nil
 	}
-	
-	// Create a channel to signal when we've acquired the lock
+
+	// Try global system lock first (for multiple MCP server instances)
+	globalRelease, err := acquireGlobalTTSLock(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Then acquire local process mutex
 	acquired := make(chan struct{})
-	
+
 	go func() {
 		ttsMutex.Lock()
 		close(acquired)
 	}()
-	
+
 	// Wait for either lock acquisition or context cancellation
 	select {
 	case <-acquired:
-		// We got the lock
-		return func() { ttsMutex.Unlock() }, nil
+		// We got both locks - return combined release function
+		return func() {
+			ttsMutex.Unlock()
+			globalRelease()
+		}, nil
 	case <-ctx.Done():
 		// Context was cancelled while waiting
-		// We need to check if we actually got the lock
+		globalRelease() // Release global lock first
+
+		// Check if we got the local lock after cancellation
 		select {
 		case <-acquired:
-			// We got the lock after context was cancelled, release it
 			ttsMutex.Unlock()
 		default:
-			// We never got the lock
 		}
 		return nil, ctx.Err()
 	}
@@ -145,7 +154,7 @@ func init() {
 	if os.Getenv("MCP_TTS_SUPPRESS_SPEAKING_OUTPUT") == "true" {
 		suppressSpeakingOutput = true
 	}
-	
+
 	// Check environment variable for concurrent TTS
 	if os.Getenv("MCP_TTS_ALLOW_CONCURRENT") == "true" {
 		sequentialTTS = false
@@ -174,7 +183,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 		if verbose {
 			log.SetLevel(log.DebugLevel)
 		}
-		
+
 		// Log sequential TTS status
 		if sequentialTTS {
 			log.Debug("Sequential TTS enabled - only one speech operation at a time")
