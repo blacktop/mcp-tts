@@ -70,32 +70,39 @@ func acquireTTSLock(ctx context.Context) (release func(), err error) {
 		return func() {}, nil
 	}
 
-	// Try global system lock first (for multiple MCP server instances)
-	globalRelease, err := acquireGlobalTTSLock(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	// Then acquire local process mutex
+	// Acquire local process mutex first to prevent deadlocks
+	log.Debug("Attempting to acquire local TTS mutex", "pid", os.Getpid())
 	acquired := make(chan struct{})
-
+	
 	go func() {
 		ttsMutex.Lock()
+		log.Debug("Local TTS mutex acquired", "pid", os.Getpid())
 		close(acquired)
 	}()
 
-	// Wait for either lock acquisition or context cancellation
+	// Wait for local mutex or context cancellation
 	select {
 	case <-acquired:
-		// We got both locks - return combined release function
-		return func() {
+		// Got local mutex, now try global system lock
+		log.Debug("Attempting to acquire global TTS lock", "pid", os.Getpid())
+		globalRelease, err := acquireGlobalTTSLock(ctx)
+		if err != nil {
+			// Failed to get global lock, release local mutex
+			log.Debug("Failed to acquire global lock, releasing local mutex", "pid", os.Getpid(), "error", err)
 			ttsMutex.Unlock()
+			return nil, err
+		}
+		
+		log.Debug("Both TTS locks acquired successfully", "pid", os.Getpid())
+		// We got both locks - return combined release function (global first, then local)
+		return func() {
+			log.Debug("Releasing both TTS locks", "pid", os.Getpid())
 			globalRelease()
+			ttsMutex.Unlock()
+			log.Debug("Both TTS locks released", "pid", os.Getpid())
 		}, nil
 	case <-ctx.Done():
-		// Context was cancelled while waiting
-		globalRelease() // Release global lock first
-
+		// Context was cancelled while waiting for local mutex
 		// Check if we got the local lock after cancellation
 		select {
 		case <-acquired:
