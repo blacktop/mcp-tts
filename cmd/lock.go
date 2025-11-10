@@ -148,27 +148,37 @@ func (m *ttsMutexFile) atomicCleanupStale() bool {
 	return true
 }
 
-// isStale checks if lock is from a dead process or older than 30 seconds
+// isStale determines whether the existing lock directory should be considered stale.
+// A lock is stale only if:
+//   - The recorded PID is not running anymore, OR
+//   - The lock metadata is missing/invalid AND the directory is older than a grace period.
+// We deliberately do NOT time out active locks by age alone to avoid breaking
+// long-running speech operations.
 func (m *ttsMutexFile) isStale() bool {
-	data, err := os.ReadFile(m.contentFile)
-	if err != nil {
-		return true // File doesn't exist or can't be read
-	}
+    // If we can read valid lock metadata, prefer process liveness over age.
+    if data, err := os.ReadFile(m.contentFile); err == nil {
+        var content lockContent
+        if json.Unmarshal(data, &content) == nil {
+            if process, err := os.FindProcess(content.PID); err == nil {
+                // Signal 0 is a no-op used to test process existence on Unix.
+                if err := process.Signal(syscall.Signal(0)); err == nil {
+                    // Process appears to be alive: not stale regardless of age.
+                    return false
+                }
+            }
+            // Could not find the process or signalling failed: stale.
+            return true
+        }
+        // Corrupt JSON: fall through to age heuristic below.
+    }
 
-	var content lockContent
-	if err := json.Unmarshal(data, &content); err != nil {
-		// Old format or corrupt file - consider stale
-		return true
-	}
-
-	// Check if process still exists (Unix-specific)
-	if process, err := os.FindProcess(content.PID); err == nil {
-		if err := process.Signal(syscall.Signal(0)); err == nil {
-			// Process still running - check timeout (reduced from 2 minutes to 30 seconds)
-			return time.Since(content.StartTime) > 30*time.Second
-		}
-	}
-
-	// Process doesn't exist or signal failed - definitely stale
-	return true
+    // No readable/valid metadata: use directory age as a conservative heuristic.
+    // Give plenty of time in case another process just created the dir but
+    // hasn't written content yet.
+    const grace = 5 * time.Minute
+    if fi, err := os.Stat(m.lockDir); err == nil {
+        return time.Since(fi.ModTime()) > grace
+    }
+    // If we cannot stat the directory, assume stale so callers can clean up.
+    return true
 }
