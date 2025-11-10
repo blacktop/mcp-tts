@@ -11,7 +11,7 @@ require (
 	github.com/openai/openai-go v1.12.0
 	github.com/spf13/cobra v1.9.1
 	github.com/stretchr/testify v1.11.0
-	golang.org/x/sync v0.16.0
+	golang.org/x/sync v0.18.0
 	google.golang.org/genai v1.21.0
 )
 
