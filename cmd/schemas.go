@@ -1,106 +1,122 @@
 package cmd
 
 import (
-	"github.com/modelcontextprotocol/go-sdk/jsonschema"
+	"encoding/json"
+	"fmt"
 )
 
 // Custom schema builders that create LM Studio-compatible schemas
 // These avoid using complex additionalProperties objects
+// Returns json.RawMessage that can be used directly as Tool.InputSchema
 
-func buildSayTTSSchema() *jsonschema.Schema {
-	// Create a schema that explicitly sets AdditionalProperties to false
-	// to avoid LM Studio compatibility issues
-	return &jsonschema.Schema{
-		Type: "object",
-		Properties: map[string]*jsonschema.Schema{
-			"text": {
-				Type:        "string",
-				Description: "The text to speak aloud",
+func buildSayTTSSchema() json.RawMessage {
+	// Note: AdditionalProperties behavior is handled by the MCP SDK
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"text": map[string]any{
+				"type":        "string",
+				"description": "The text to speak aloud",
 			},
-			"rate": {
-				Type:        "integer",
-				Description: "Speech rate in words per minute (50-500, default: 200)",
-				Minimum:     &[]float64{50}[0],
-				Maximum:     &[]float64{500}[0],
+			"rate": map[string]any{
+				"type":        "integer",
+				"description": "Speech rate in words per minute (50-500, default: 200)",
+				"minimum":     50,
+				"maximum":     500,
 			},
-			"voice": {
-				Type:        "string",
-				Description: "Voice to use for speech synthesis (e.g. 'Alex', 'Samantha', 'Victoria')",
+			"voice": map[string]any{
+				"type":        "string",
+				"description": "Voice to use for speech synthesis (e.g. 'Alex', 'Samantha', 'Victoria')",
 			},
 		},
-		Required: []string{"text"},
-		// Set AdditionalProperties to nil (allows additional properties)
-		// This avoids LM Studio compatibility issues
-		AdditionalProperties: nil,
+		"required": []string{"text"},
 	}
+	data, err := json.Marshal(schema)
+	if err != nil {
+		// This should never happen with our simple map structure, but handle it defensively
+		panic(fmt.Sprintf("failed to marshal say_tts schema: %v", err))
+	}
+	return data
 }
 
-func buildElevenLabsTTSSchema() *jsonschema.Schema {
-	return &jsonschema.Schema{
-		Type: "object",
-		Properties: map[string]*jsonschema.Schema{
-			"text": {
-				Type:        "string",
-				Description: "The text to convert to speech using ElevenLabs API",
+func buildElevenLabsTTSSchema() json.RawMessage {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"text": map[string]any{
+				"type":        "string",
+				"description": "The text to convert to speech using ElevenLabs API",
 			},
 		},
-		Required:             []string{"text"},
-		AdditionalProperties: nil,
+		"required": []string{"text"},
 	}
+	data, err := json.Marshal(schema)
+	if err != nil {
+		panic(fmt.Sprintf("failed to marshal elevenlabs_tts schema: %v", err))
+	}
+	return data
 }
 
-func buildGoogleTTSSchema() *jsonschema.Schema {
-	return &jsonschema.Schema{
-		Type: "object",
-		Properties: map[string]*jsonschema.Schema{
-			"text": {
-				Type:        "string",
-				Description: "The text to convert to speech using Google TTS",
+func buildGoogleTTSSchema() json.RawMessage {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"text": map[string]any{
+				"type":        "string",
+				"description": "The text to convert to speech using Google TTS",
 			},
-			"voice": {
-				Type:        "string",
-				Description: "Voice name to use (e.g. 'Kore', 'Aoede', 'Fenrir', default: 'Kore')",
+			"voice": map[string]any{
+				"type":        "string",
+				"description": "Voice name to use (e.g. 'Kore', 'Aoede', 'Fenrir', default: 'Kore')",
 			},
-			"model": {
-				Type:        "string",
-				Description: "TTS model to use (default: 'gemini-2.5-flash-preview-tts')",
+			"model": map[string]any{
+				"type":        "string",
+				"description": "TTS model to use (default: 'gemini-2.5-flash-preview-tts')",
 			},
 		},
-		Required:             []string{"text"},
-		AdditionalProperties: nil,
+		"required": []string{"text"},
 	}
+	data, err := json.Marshal(schema)
+	if err != nil {
+		panic(fmt.Sprintf("failed to marshal google_tts schema: %v", err))
+	}
+	return data
 }
 
-func buildOpenAITTSSchema() *jsonschema.Schema {
-	return &jsonschema.Schema{
-		Type: "object",
-		Properties: map[string]*jsonschema.Schema{
-			"text": {
-				Type:        "string",
-				Description: "The text to convert to speech using OpenAI TTS",
+func buildOpenAITTSSchema() json.RawMessage {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"text": map[string]any{
+				"type":        "string",
+				"description": "The text to convert to speech using OpenAI TTS",
 			},
-			"voice": {
-				Type:        "string",
-				Description: "Voice to use (alloy, ash, ballad, coral, echo, fable, nova, onyx, sage, shimmer, verse; default: 'alloy')",
-				Enum:        []any{"alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer", "verse"},
+			"voice": map[string]any{
+				"type":        "string",
+				"description": "Voice to use (alloy, ash, ballad, coral, echo, fable, nova, onyx, sage, shimmer, verse; default: 'alloy')",
+				"enum":        []string{"alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer", "verse"},
 			},
-			"model": {
-				Type:        "string",
-				Description: "TTS model to use (gpt-4o-mini-tts, gpt-4o-audio-preview; default: 'gpt-4o-mini-tts')",
-				Enum:        []any{"gpt-4o-mini-tts", "gpt-4o-audio-preview"},
+			"model": map[string]any{
+				"type":        "string",
+				"description": "TTS model to use (gpt-4o-mini-tts, gpt-4o-audio-preview; default: 'gpt-4o-mini-tts')",
+				"enum":        []string{"gpt-4o-mini-tts", "gpt-4o-audio-preview"},
 			},
-			"speed": {
-				Type:        "number",
-				Description: "Speech speed (0.25-4.0, default: 1.0)",
-				Minimum:     &[]float64{0.25}[0],
-				Maximum:     &[]float64{4.0}[0],
+			"speed": map[string]any{
+				"type":        "number",
+				"description": "Speech speed (0.25-4.0, default: 1.0)",
+				"minimum":     0.25,
+				"maximum":     4.0,
 			},
-			"instructions": {
-				Type:        "string",
-				Description: "Instructions for voice modulation and style",
+			"instructions": map[string]any{
+				"type":        "string",
+				"description": "Instructions for voice modulation and style",
 			},
 		},
-		Required:             []string{"text"},
-		AdditionalProperties: nil,
+		"required": []string{"text"},
 	}
+	data, err := json.Marshal(schema)
+	if err != nil {
+		panic(fmt.Sprintf("failed to marshal openai_tts schema: %v", err))
+	}
+	return data
 }

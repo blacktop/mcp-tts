@@ -668,7 +668,7 @@ func TestCancellation(t *testing.T) {
 
 		// Create a context that we can cancel
 		ctx, cancel := context.WithCancel(context.Background())
-		
+
 		params := &mcp.CallToolParamsFor[SayTTSParams]{
 			Name: "say_tts",
 			Arguments: SayTTSParams{
@@ -684,7 +684,7 @@ func TestCancellation(t *testing.T) {
 		// Should handle cancellation gracefully
 		require.NoError(t, err)
 		require.NotNil(t, result)
-		
+
 		resultText := extractTextFromResult(result)
 		assert.Contains(t, resultText, "cancelled", "Should indicate cancellation")
 	})
@@ -703,7 +703,7 @@ func TestCancellation(t *testing.T) {
 
 		// Create a context that we can cancel
 		ctx, cancel := context.WithCancel(context.Background())
-		
+
 		params := &mcp.CallToolParamsFor[GoogleTTSParams]{
 			Name: "google_tts",
 			Arguments: GoogleTTSParams{
@@ -719,7 +719,7 @@ func TestCancellation(t *testing.T) {
 		// Should handle cancellation gracefully
 		require.NoError(t, err)
 		require.NotNil(t, result)
-		
+
 		resultText := extractTextFromResult(result)
 		assert.Contains(t, resultText, "cancelled", "Should indicate cancellation")
 	})
@@ -738,7 +738,7 @@ func TestCancellation(t *testing.T) {
 
 		// Create a context that we can cancel
 		ctx, cancel := context.WithCancel(context.Background())
-		
+
 		params := &mcp.CallToolParamsFor[OpenAITTSParams]{
 			Name: "openai_tts",
 			Arguments: OpenAITTSParams{
@@ -754,7 +754,7 @@ func TestCancellation(t *testing.T) {
 		// Should handle cancellation gracefully
 		require.NoError(t, err)
 		require.NotNil(t, result)
-		
+
 		resultText := extractTextFromResult(result)
 		assert.Contains(t, resultText, "cancelled", "Should indicate cancellation")
 	})
@@ -773,7 +773,7 @@ func TestCancellation(t *testing.T) {
 
 		// Create a context that we can cancel
 		ctx, cancel := context.WithCancel(context.Background())
-		
+
 		params := &mcp.CallToolParamsFor[ElevenLabsTTSParams]{
 			Name: "elevenlabs_tts",
 			Arguments: ElevenLabsTTSParams{
@@ -789,7 +789,7 @@ func TestCancellation(t *testing.T) {
 		// Should handle cancellation gracefully
 		require.NoError(t, err)
 		require.NotNil(t, result)
-		
+
 		resultText := extractTextFromResult(result)
 		assert.Contains(t, resultText, "cancelled", "Should indicate cancellation")
 	})
@@ -804,10 +804,10 @@ func TestContextTimeout(t *testing.T) {
 		// Create a context with a very short timeout
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
 		defer cancel()
-		
+
 		// Add a small delay to ensure timeout occurs
 		time.Sleep(2 * time.Millisecond)
-		
+
 		params := &mcp.CallToolParamsFor[SayTTSParams]{
 			Name: "say_tts",
 			Arguments: SayTTSParams{
@@ -820,7 +820,7 @@ func TestContextTimeout(t *testing.T) {
 		// Should handle timeout gracefully
 		require.NoError(t, err)
 		require.NotNil(t, result)
-		
+
 		resultText := extractTextFromResult(result)
 		assert.Contains(t, resultText, "cancelled", "Should indicate cancellation due to timeout")
 	})
@@ -1013,6 +1013,7 @@ func callCancellableElevenLabsTTSHandler(ctx context.Context, params *mcp.CallTo
 		Content: []mcp.Content{&mcp.TextContent{Text: responseText}},
 	}, nil
 }
+
 // TestMCPServerCancellation tests cancellation behavior in a more realistic scenario
 func TestMCPServerCancellation(t *testing.T) {
 	t.Run("concurrent requests with cancellation", func(t *testing.T) {
@@ -1028,7 +1029,7 @@ func TestMCPServerCancellation(t *testing.T) {
 		for i := 0; i < numRequests; i++ {
 			go func(requestID int) {
 				ctx, cancel := context.WithCancel(context.Background())
-				
+
 				params := &mcp.CallToolParamsFor[SayTTSParams]{
 					Name: "say_tts",
 					Arguments: SayTTSParams{
@@ -1072,11 +1073,11 @@ func TestMCPServerCancellation(t *testing.T) {
 
 		// Verify we got all responses
 		assert.Equal(t, numRequests, len(completedResults)+len(receivedErrors), "Should receive all responses")
-		
+
 		// Count cancelled vs completed requests
 		cancelledCount := 0
 		completedCount := 0
-		
+
 		for _, result := range completedResults {
 			if strings.Contains(result, "cancelled") {
 				cancelledCount++
@@ -1093,7 +1094,7 @@ func TestMCPServerCancellation(t *testing.T) {
 	t.Run("graceful shutdown simulation", func(t *testing.T) {
 		// Simulate a scenario where the server needs to shut down gracefully
 		ctx, cancel := context.WithCancel(context.Background())
-		
+
 		// Start a long-running operation
 		params := &mcp.CallToolParamsFor[GoogleTTSParams]{
 			Name: "google_tts",
@@ -1138,10 +1139,9 @@ func TestMCPServerCancellation(t *testing.T) {
 		// Verify the operation was cancelled gracefully
 		require.NoError(t, err)
 		require.NotNil(t, result)
-		
+
 		resultText := extractTextFromResult(result)
 		assert.Contains(t, resultText, "cancelled", "Operation should indicate it was cancelled")
 		t.Logf("Graceful shutdown result: %s", resultText)
 	})
 }
-

@@ -20,7 +20,7 @@ func TestVoiceValidation(t *testing.T) {
 		{"name with hyphen", "Eddy (English (UK))", true, "Name with hyphen in parentheses"},
 		{"name with number", "Eddy (German (Germany))", true, "Name with number in language"},
 		{"complex voice", "Grandpa (Chinese (China mainland))", true, "Complex voice name"},
-		
+
 		// Invalid voices (these should fail with the original validation)
 		{"command injection attempt", "Alex; rm -rf /", false, "Command injection attempt"},
 		{"backtick injection", "Alex`whoami`", false, "Backtick command substitution"},
@@ -36,7 +36,7 @@ func TestVoiceValidation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Test the validation logic that was in the original code
 			isValid := validateVoiceCharacters(tt.voice)
-			
+
 			if tt.shouldPass && !isValid {
 				t.Errorf("Voice validation failed for valid voice '%s': %s", tt.voice, tt.description)
 			} else if !tt.shouldPass && isValid {
@@ -49,7 +49,7 @@ func TestVoiceValidation(t *testing.T) {
 // validateVoiceCharacters mimics the updated validation logic from root.go
 func validateVoiceCharacters(voice string) bool {
 	for _, r := range voice {
-		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || 
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
 			r == ' ' || r == '(' || r == ')' || r == '-' || r == '_') {
 			return false
 		}

@@ -26,7 +26,7 @@ type lockContent struct {
 
 // Directory-based file locking for TTS coordination (mkdir is atomic)
 type ttsMutexFile struct {
-	lockDir    string
+	lockDir     string
 	contentFile string
 }
 
@@ -44,7 +44,7 @@ func acquireGlobalTTSLock(ctx context.Context) (release func(), err error) {
 	}
 
 	lock := &ttsMutexFile{
-		lockDir:    lockDir,
+		lockDir:     lockDir,
 		contentFile: filepath.Join(lockDir, "content.json"),
 	}
 
@@ -97,7 +97,7 @@ func (m *ttsMutexFile) acquireLock(ctx context.Context) error {
 			log.Debug("Unexpected error creating lock directory", "lockDir", m.lockDir, "pid", os.Getpid(), "error", err)
 			return fmt.Errorf("failed to create lock directory: %w", err)
 		}
-		
+
 		log.Debug("Lock directory already exists, checking if stale", "lockDir", m.lockDir, "pid", os.Getpid())
 
 		// Lock exists - atomically cleanup if stale
