@@ -13,6 +13,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Test helper types to simulate generic tool params/results
+type TestCallToolParams[T any] struct {
+	Name      string
+	Arguments T
+}
+
+type TestCallToolResult struct {
+	Content []mcp.Content
+	IsError bool
+}
+
 // Helper functions for creating pointers to basic types
 func stringPtr(s string) *string {
 	return &s
@@ -118,7 +129,7 @@ func TestSayTTSTool(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			params := &mcp.CallToolParamsFor[SayTTSParams]{
+			params := &TestCallToolParams[SayTTSParams]{
 				Name:      "say_tts",
 				Arguments: tt.params,
 			}
@@ -220,7 +231,7 @@ func TestGoogleTTSTool(t *testing.T) {
 			tt.setupEnv()
 
 			ctx := context.Background()
-			params := &mcp.CallToolParamsFor[GoogleTTSParams]{
+			params := &TestCallToolParams[GoogleTTSParams]{
 				Name:      "google_tts",
 				Arguments: tt.params,
 			}
@@ -352,7 +363,7 @@ func TestOpenAITTSTool(t *testing.T) {
 			tt.setupEnv()
 
 			ctx := context.Background()
-			params := &mcp.CallToolParamsFor[OpenAITTSParams]{
+			params := &TestCallToolParams[OpenAITTSParams]{
 				Name:      "openai_tts",
 				Arguments: tt.params,
 			}
@@ -429,7 +440,7 @@ func TestElevenLabsTTSTool(t *testing.T) {
 			tt.setupEnv()
 
 			ctx := context.Background()
-			params := &mcp.CallToolParamsFor[ElevenLabsTTSParams]{
+			params := &TestCallToolParams[ElevenLabsTTSParams]{
 				Name:      "elevenlabs_tts",
 				Arguments: tt.params,
 			}
@@ -504,10 +515,10 @@ func TestParameterValidation(t *testing.T) {
 
 // Helper functions to extract handlers and test them in isolation
 
-func callSayTTSHandler(ctx context.Context, params *mcp.CallToolParamsFor[SayTTSParams]) (*mcp.CallToolResultFor[any], error) {
+func callSayTTSHandler(ctx context.Context, params *TestCallToolParams[SayTTSParams]) (*TestCallToolResult, error) {
 	// Mock implementation that simulates the say handler logic without actual execution
 	if params.Arguments.Text == "" {
-		return &mcp.CallToolResultFor[any]{
+		return &TestCallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: "Error: Empty text provided"}},
 			IsError: true,
 		}, nil
@@ -515,15 +526,15 @@ func callSayTTSHandler(ctx context.Context, params *mcp.CallToolParamsFor[SayTTS
 
 	// Mock successful execution
 	responseText := fmt.Sprintf("Speaking: %s", params.Arguments.Text)
-	return &mcp.CallToolResultFor[any]{
+	return &TestCallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: responseText}},
 	}, nil
 }
 
-func callGoogleTTSHandler(ctx context.Context, params *mcp.CallToolParamsFor[GoogleTTSParams]) (*mcp.CallToolResultFor[any], error) {
+func callGoogleTTSHandler(ctx context.Context, params *TestCallToolParams[GoogleTTSParams]) (*TestCallToolResult, error) {
 	// Mock implementation that simulates the Google TTS handler logic
 	if params.Arguments.Text == "" {
-		return &mcp.CallToolResultFor[any]{
+		return &TestCallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: "Error: Empty text provided"}},
 			IsError: true,
 		}, nil
@@ -535,7 +546,7 @@ func callGoogleTTSHandler(ctx context.Context, params *mcp.CallToolParamsFor[Goo
 		apiKey = os.Getenv("GEMINI_API_KEY")
 	}
 	if apiKey == "" {
-		return &mcp.CallToolResultFor[any]{
+		return &TestCallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: "Error: GOOGLE_AI_API_KEY or GEMINI_API_KEY is not set"}},
 			IsError: true,
 		}, nil
@@ -554,15 +565,15 @@ func callGoogleTTSHandler(ctx context.Context, params *mcp.CallToolParamsFor[Goo
 
 	// Mock successful execution
 	responseText := fmt.Sprintf("Speaking: %s (via Google TTS with voice %s using model %s)", params.Arguments.Text, voice, model)
-	return &mcp.CallToolResultFor[any]{
+	return &TestCallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: responseText}},
 	}, nil
 }
 
-func callOpenAITTSHandler(ctx context.Context, params *mcp.CallToolParamsFor[OpenAITTSParams]) (*mcp.CallToolResultFor[any], error) {
+func callOpenAITTSHandler(ctx context.Context, params *TestCallToolParams[OpenAITTSParams]) (*TestCallToolResult, error) {
 	// Mock implementation that simulates the OpenAI TTS handler logic
 	if params.Arguments.Text == "" {
-		return &mcp.CallToolResultFor[any]{
+		return &TestCallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: "Error: Empty text provided"}},
 			IsError: true,
 		}, nil
@@ -571,7 +582,7 @@ func callOpenAITTSHandler(ctx context.Context, params *mcp.CallToolParamsFor[Ope
 	// Check API key
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
-		return &mcp.CallToolResultFor[any]{
+		return &TestCallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: "Error: OPENAI_API_KEY is not set"}},
 			IsError: true,
 		}, nil
@@ -585,15 +596,15 @@ func callOpenAITTSHandler(ctx context.Context, params *mcp.CallToolParamsFor[Ope
 
 	// Mock successful execution (using voice for simplicity in tests)
 	responseText := fmt.Sprintf("Speaking: %s (via OpenAI TTS with voice %s)", params.Arguments.Text, voice)
-	return &mcp.CallToolResultFor[any]{
+	return &TestCallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: responseText}},
 	}, nil
 }
 
-func callElevenLabsTTSHandler(ctx context.Context, params *mcp.CallToolParamsFor[ElevenLabsTTSParams]) (*mcp.CallToolResultFor[any], error) {
+func callElevenLabsTTSHandler(ctx context.Context, params *TestCallToolParams[ElevenLabsTTSParams]) (*TestCallToolResult, error) {
 	// Mock implementation that simulates the ElevenLabs handler logic
 	if params.Arguments.Text == "" {
-		return &mcp.CallToolResultFor[any]{
+		return &TestCallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: "Error: text must be a string"}},
 			IsError: true,
 		}, nil
@@ -602,7 +613,7 @@ func callElevenLabsTTSHandler(ctx context.Context, params *mcp.CallToolParamsFor
 	// Check API key
 	apiKey := os.Getenv("ELEVENLABS_API_KEY")
 	if apiKey == "" {
-		return &mcp.CallToolResultFor[any]{
+		return &TestCallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: "Error: ELEVENLABS_API_KEY is not set"}},
 			IsError: true,
 		}, nil
@@ -610,12 +621,12 @@ func callElevenLabsTTSHandler(ctx context.Context, params *mcp.CallToolParamsFor
 
 	// Mock successful execution
 	responseText := fmt.Sprintf("Speaking: %s", params.Arguments.Text)
-	return &mcp.CallToolResultFor[any]{
+	return &TestCallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: responseText}},
 	}, nil
 }
 
-func extractTextFromResult(result *mcp.CallToolResultFor[any]) string {
+func extractTextFromResult(result *TestCallToolResult) string {
 	if result == nil || len(result.Content) == 0 {
 		return ""
 	}
@@ -649,7 +660,7 @@ func BenchmarkParameterValidation(b *testing.B) {
 func BenchmarkHandlerCreation(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		params := &mcp.CallToolParamsFor[SayTTSParams]{
+		params := &TestCallToolParams[SayTTSParams]{
 			Name: "say_tts",
 			Arguments: SayTTSParams{
 				Text: "Benchmark test",
@@ -669,7 +680,7 @@ func TestCancellation(t *testing.T) {
 		// Create a context that we can cancel
 		ctx, cancel := context.WithCancel(context.Background())
 
-		params := &mcp.CallToolParamsFor[SayTTSParams]{
+		params := &TestCallToolParams[SayTTSParams]{
 			Name: "say_tts",
 			Arguments: SayTTSParams{
 				Text: "This is a long text that should be cancelled before completion",
@@ -704,7 +715,7 @@ func TestCancellation(t *testing.T) {
 		// Create a context that we can cancel
 		ctx, cancel := context.WithCancel(context.Background())
 
-		params := &mcp.CallToolParamsFor[GoogleTTSParams]{
+		params := &TestCallToolParams[GoogleTTSParams]{
 			Name: "google_tts",
 			Arguments: GoogleTTSParams{
 				Text: "This should be cancelled",
@@ -739,7 +750,7 @@ func TestCancellation(t *testing.T) {
 		// Create a context that we can cancel
 		ctx, cancel := context.WithCancel(context.Background())
 
-		params := &mcp.CallToolParamsFor[OpenAITTSParams]{
+		params := &TestCallToolParams[OpenAITTSParams]{
 			Name: "openai_tts",
 			Arguments: OpenAITTSParams{
 				Text: "This should be cancelled",
@@ -774,7 +785,7 @@ func TestCancellation(t *testing.T) {
 		// Create a context that we can cancel
 		ctx, cancel := context.WithCancel(context.Background())
 
-		params := &mcp.CallToolParamsFor[ElevenLabsTTSParams]{
+		params := &TestCallToolParams[ElevenLabsTTSParams]{
 			Name: "elevenlabs_tts",
 			Arguments: ElevenLabsTTSParams{
 				Text: "This should be cancelled",
@@ -808,7 +819,7 @@ func TestContextTimeout(t *testing.T) {
 		// Add a small delay to ensure timeout occurs
 		time.Sleep(2 * time.Millisecond)
 
-		params := &mcp.CallToolParamsFor[SayTTSParams]{
+		params := &TestCallToolParams[SayTTSParams]{
 			Name: "say_tts",
 			Arguments: SayTTSParams{
 				Text: "This should timeout",
@@ -828,11 +839,11 @@ func TestContextTimeout(t *testing.T) {
 
 // Cancellable handler implementations that simulate the actual handlers with cancellation checks
 
-func callCancellableSayTTSHandler(ctx context.Context, params *mcp.CallToolParamsFor[SayTTSParams]) (*mcp.CallToolResultFor[any], error) {
+func callCancellableSayTTSHandler(ctx context.Context, params *TestCallToolParams[SayTTSParams]) (*TestCallToolResult, error) {
 	// Check for early cancellation (simulates the actual handler pattern)
 	select {
 	case <-ctx.Done():
-		return &mcp.CallToolResultFor[any]{
+		return &TestCallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: "Request cancelled"}},
 		}, nil
 	default:
@@ -840,7 +851,7 @@ func callCancellableSayTTSHandler(ctx context.Context, params *mcp.CallToolParam
 
 	// Basic validation
 	if params.Arguments.Text == "" {
-		return &mcp.CallToolResultFor[any]{
+		return &TestCallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: "Error: Empty text provided"}},
 			IsError: true,
 		}, nil
@@ -850,7 +861,7 @@ func callCancellableSayTTSHandler(ctx context.Context, params *mcp.CallToolParam
 	for i := 0; i < 5; i++ {
 		select {
 		case <-ctx.Done():
-			return &mcp.CallToolResultFor[any]{
+			return &TestCallToolResult{
 				Content: []mcp.Content{&mcp.TextContent{Text: "Say command cancelled"}},
 			}, nil
 		case <-time.After(10 * time.Millisecond):
@@ -860,16 +871,16 @@ func callCancellableSayTTSHandler(ctx context.Context, params *mcp.CallToolParam
 
 	// Mock successful execution (if not cancelled)
 	responseText := fmt.Sprintf("Speaking: %s", params.Arguments.Text)
-	return &mcp.CallToolResultFor[any]{
+	return &TestCallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: responseText}},
 	}, nil
 }
 
-func callCancellableGoogleTTSHandler(ctx context.Context, params *mcp.CallToolParamsFor[GoogleTTSParams]) (*mcp.CallToolResultFor[any], error) {
+func callCancellableGoogleTTSHandler(ctx context.Context, params *TestCallToolParams[GoogleTTSParams]) (*TestCallToolResult, error) {
 	// Check for early cancellation
 	select {
 	case <-ctx.Done():
-		return &mcp.CallToolResultFor[any]{
+		return &TestCallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: "Request cancelled"}},
 		}, nil
 	default:
@@ -877,7 +888,7 @@ func callCancellableGoogleTTSHandler(ctx context.Context, params *mcp.CallToolPa
 
 	// Basic validation
 	if params.Arguments.Text == "" {
-		return &mcp.CallToolResultFor[any]{
+		return &TestCallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: "Error: Empty text provided"}},
 			IsError: true,
 		}, nil
@@ -889,7 +900,7 @@ func callCancellableGoogleTTSHandler(ctx context.Context, params *mcp.CallToolPa
 		apiKey = os.Getenv("GEMINI_API_KEY")
 	}
 	if apiKey == "" {
-		return &mcp.CallToolResultFor[any]{
+		return &TestCallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: "Error: GOOGLE_AI_API_KEY or GEMINI_API_KEY is not set"}},
 			IsError: true,
 		}, nil
@@ -899,7 +910,7 @@ func callCancellableGoogleTTSHandler(ctx context.Context, params *mcp.CallToolPa
 	for i := 0; i < 3; i++ {
 		select {
 		case <-ctx.Done():
-			return &mcp.CallToolResultFor[any]{
+			return &TestCallToolResult{
 				Content: []mcp.Content{&mcp.TextContent{Text: "Google TTS audio playback cancelled"}},
 			}, nil
 		case <-time.After(10 * time.Millisecond):
@@ -913,16 +924,16 @@ func callCancellableGoogleTTSHandler(ctx context.Context, params *mcp.CallToolPa
 		voice = *params.Arguments.Voice
 	}
 	responseText := fmt.Sprintf("Speaking: %s (via Google TTS with voice %s)", params.Arguments.Text, voice)
-	return &mcp.CallToolResultFor[any]{
+	return &TestCallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: responseText}},
 	}, nil
 }
 
-func callCancellableOpenAITTSHandler(ctx context.Context, params *mcp.CallToolParamsFor[OpenAITTSParams]) (*mcp.CallToolResultFor[any], error) {
+func callCancellableOpenAITTSHandler(ctx context.Context, params *TestCallToolParams[OpenAITTSParams]) (*TestCallToolResult, error) {
 	// Check for early cancellation
 	select {
 	case <-ctx.Done():
-		return &mcp.CallToolResultFor[any]{
+		return &TestCallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: "Request cancelled"}},
 		}, nil
 	default:
@@ -930,7 +941,7 @@ func callCancellableOpenAITTSHandler(ctx context.Context, params *mcp.CallToolPa
 
 	// Basic validation
 	if params.Arguments.Text == "" {
-		return &mcp.CallToolResultFor[any]{
+		return &TestCallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: "Error: Empty text provided"}},
 			IsError: true,
 		}, nil
@@ -939,7 +950,7 @@ func callCancellableOpenAITTSHandler(ctx context.Context, params *mcp.CallToolPa
 	// Check API key
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
-		return &mcp.CallToolResultFor[any]{
+		return &TestCallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: "Error: OPENAI_API_KEY is not set"}},
 			IsError: true,
 		}, nil
@@ -949,7 +960,7 @@ func callCancellableOpenAITTSHandler(ctx context.Context, params *mcp.CallToolPa
 	for i := 0; i < 3; i++ {
 		select {
 		case <-ctx.Done():
-			return &mcp.CallToolResultFor[any]{
+			return &TestCallToolResult{
 				Content: []mcp.Content{&mcp.TextContent{Text: "OpenAI TTS audio playback cancelled"}},
 			}, nil
 		case <-time.After(10 * time.Millisecond):
@@ -963,16 +974,16 @@ func callCancellableOpenAITTSHandler(ctx context.Context, params *mcp.CallToolPa
 		voice = *params.Arguments.Voice
 	}
 	responseText := fmt.Sprintf("Speaking: %s (via OpenAI TTS with voice %s)", params.Arguments.Text, voice)
-	return &mcp.CallToolResultFor[any]{
+	return &TestCallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: responseText}},
 	}, nil
 }
 
-func callCancellableElevenLabsTTSHandler(ctx context.Context, params *mcp.CallToolParamsFor[ElevenLabsTTSParams]) (*mcp.CallToolResultFor[any], error) {
+func callCancellableElevenLabsTTSHandler(ctx context.Context, params *TestCallToolParams[ElevenLabsTTSParams]) (*TestCallToolResult, error) {
 	// Check for early cancellation
 	select {
 	case <-ctx.Done():
-		return &mcp.CallToolResultFor[any]{
+		return &TestCallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: "Request cancelled"}},
 		}, nil
 	default:
@@ -980,7 +991,7 @@ func callCancellableElevenLabsTTSHandler(ctx context.Context, params *mcp.CallTo
 
 	// Basic validation
 	if params.Arguments.Text == "" {
-		return &mcp.CallToolResultFor[any]{
+		return &TestCallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: "Error: text must be a string"}},
 			IsError: true,
 		}, nil
@@ -989,7 +1000,7 @@ func callCancellableElevenLabsTTSHandler(ctx context.Context, params *mcp.CallTo
 	// Check API key
 	apiKey := os.Getenv("ELEVENLABS_API_KEY")
 	if apiKey == "" {
-		return &mcp.CallToolResultFor[any]{
+		return &TestCallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: "Error: ELEVENLABS_API_KEY is not set"}},
 			IsError: true,
 		}, nil
@@ -999,7 +1010,7 @@ func callCancellableElevenLabsTTSHandler(ctx context.Context, params *mcp.CallTo
 	for i := 0; i < 3; i++ {
 		select {
 		case <-ctx.Done():
-			return &mcp.CallToolResultFor[any]{
+			return &TestCallToolResult{
 				Content: []mcp.Content{&mcp.TextContent{Text: "Audio playback cancelled"}},
 			}, nil
 		case <-time.After(10 * time.Millisecond):
@@ -1009,7 +1020,7 @@ func callCancellableElevenLabsTTSHandler(ctx context.Context, params *mcp.CallTo
 
 	// Mock successful execution
 	responseText := fmt.Sprintf("Speaking: %s", params.Arguments.Text)
-	return &mcp.CallToolResultFor[any]{
+	return &TestCallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: responseText}},
 	}, nil
 }
@@ -1030,7 +1041,7 @@ func TestMCPServerCancellation(t *testing.T) {
 			go func(requestID int) {
 				ctx, cancel := context.WithCancel(context.Background())
 
-				params := &mcp.CallToolParamsFor[SayTTSParams]{
+				params := &TestCallToolParams[SayTTSParams]{
 					Name: "say_tts",
 					Arguments: SayTTSParams{
 						Text: fmt.Sprintf("Request %d - this is a test message", requestID),
@@ -1096,7 +1107,7 @@ func TestMCPServerCancellation(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 
 		// Start a long-running operation
-		params := &mcp.CallToolParamsFor[GoogleTTSParams]{
+		params := &TestCallToolParams[GoogleTTSParams]{
 			Name: "google_tts",
 			Arguments: GoogleTTSParams{
 				Text: "This is a long operation that should be cancelled during shutdown",
@@ -1116,7 +1127,7 @@ func TestMCPServerCancellation(t *testing.T) {
 
 		// Start the operation in a goroutine
 		done := make(chan struct{})
-		var result *mcp.CallToolResultFor[any]
+		var result *TestCallToolResult
 		var err error
 
 		go func() {
