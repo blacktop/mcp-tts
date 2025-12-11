@@ -36,11 +36,7 @@ Uses the [ElevenLabs](https://elevenlabs.io/app/speech-synthesis/text-to-speech)
 
 Uses Google's [Gemini TTS models](https://ai.google.dev/gemini-api/docs/speech-generation) to speak the text with 30 high-quality voices. Available voices include:
 
-- **Zephyr** (Bright), **Puck** (Upbeat), **Charon** (Informative)  
-- **Kore** (Firm), **Fenrir** (Excitable), **Leda** (Youthful)
-- **Orus** (Firm), **Aoede** (Breezy), **Callirhoe** (Easy-going)
-- **Autonoe** (Bright), **Enceladus** (Breathy), **Iapetus** (Clear)
-- And 18 more voices with various characteristics
+**Achernar, Achird, Algenib, Algieba, Alnilam, Aoede, Autonoe, Callirrhoe, Charon, Despina, Enceladus, Erinome, Fenrir, Gacrux, Iapetus, Kore, Laomedeia, Leda, Orus, Puck, Pulcherrima, Rasalgethi, Sadachbia, Sadaltager, Schedar, Sulafat, Umbriel, Vindemiatrix, Zephyr, Zubenelgenubi**
 
 ### `openai_tts`
 
@@ -140,7 +136,11 @@ Flags:
   -v, --verbose                    Enable verbose debug logging
 ```
 
-#### Set Claude Desktop Config
+### Configuration
+
+#### [Claude Desktop](https://claude.ai/download)
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ```json
 {
@@ -155,6 +155,50 @@ Flags:
         "OPENAI_TTS_INSTRUCTIONS": "Speak in a cheerful and positive tone",
         "MCP_TTS_SUPPRESS_SPEAKING_OUTPUT": "true",
         "MCP_TTS_ALLOW_CONCURRENT": "false"
+      }
+    }
+  }
+}
+```
+
+#### [Claude Code](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview)
+
+```bash
+claude mcp add say \
+  -e GOOGLE_AI_API_KEY=your_key \
+  -e ELEVENLABS_API_KEY=your_key \
+  -e OPENAI_API_KEY=your_key \
+  -- mcp-tts
+```
+
+#### [Codex CLI](https://platform.openai.com/docs/guides/mcp)
+
+```bash
+codex mcp add say \
+  --env GOOGLE_AI_API_KEY=your_key \
+  --env ELEVENLABS_API_KEY=your_key \
+  --env OPENAI_API_KEY=your_key \
+  -- mcp-tts
+```
+
+#### [Gemini CLI](https://github.com/google/gemini-cli)
+
+```bash
+gemini mcp add say mcp-tts \
+  -e GOOGLE_AI_API_KEY=your_key \
+  -e ELEVENLABS_API_KEY=your_key \
+  -e OPENAI_API_KEY=your_key
+```
+
+Or manually add to `~/.gemini/settings.json` (or `.gemini/settings.json` in project root):
+
+```json
+{
+  "mcpServers": {
+    "say": {
+      "command": ["mcp-tts"],
+      "env": {
+        "GOOGLE_AI_API_KEY": "..."
       }
     }
   }

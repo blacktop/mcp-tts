@@ -67,11 +67,20 @@ func buildGoogleTTSSchema() json.RawMessage {
 			},
 			"voice": map[string]any{
 				"type":        "string",
-				"description": "Voice name to use (e.g. 'Kore', 'Aoede', 'Fenrir', default: 'Kore')",
+				"description": "Voice name to use (default: 'Kore')",
+				"enum": []string{
+					"Achernar", "Achird", "Algenib", "Algieba", "Alnilam",
+					"Aoede", "Autonoe", "Callirrhoe", "Charon", "Despina",
+					"Enceladus", "Erinome", "Fenrir", "Gacrux", "Iapetus",
+					"Kore", "Laomedeia", "Leda", "Orus", "Puck",
+					"Pulcherrima", "Rasalgethi", "Sadachbia", "Sadaltager", "Schedar",
+					"Sulafat", "Umbriel", "Vindemiatrix", "Zephyr", "Zubenelgenubi",
+				},
 			},
 			"model": map[string]any{
 				"type":        "string",
 				"description": "TTS model to use (default: 'gemini-2.5-flash-preview-tts')",
+				"enum":        []string{"gemini-2.5-flash-preview-tts", "gemini-2.5-pro-preview-tts", "gemini-2.5-flash-lite-preview-tts"},
 			},
 		},
 		"required": []string{"text"},
@@ -98,8 +107,8 @@ func buildOpenAITTSSchema() json.RawMessage {
 			},
 			"model": map[string]any{
 				"type":        "string",
-				"description": "TTS model to use (gpt-4o-mini-tts, gpt-4o-audio-preview; default: 'gpt-4o-mini-tts')",
-				"enum":        []string{"gpt-4o-mini-tts", "gpt-4o-audio-preview"},
+				"description": "TTS model to use (gpt-4o-mini-tts, gpt-4o-audio-preview, tts-1, tts-1-hd; default: 'gpt-4o-mini-tts')",
+				"enum":        []string{"gpt-4o-mini-tts", "gpt-4o-audio-preview", "tts-1", "tts-1-hd"},
 			},
 			"speed": map[string]any{
 				"type":        "number",

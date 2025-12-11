@@ -126,14 +126,14 @@ type ElevenLabsTTSParams struct {
 
 type GoogleTTSParams struct {
 	Text  string  `json:"text" mcp:"The text to convert to speech using Google TTS"`
-	Voice *string `json:"voice,omitempty" mcp:"Voice name to use (e.g. 'Kore', 'Aoede', 'Fenrir', default: 'Kore')"`
-	Model *string `json:"model,omitempty" mcp:"TTS model to use (default: 'gemini-2.5-flash-preview-tts')"`
+	Voice *string `json:"voice,omitempty" mcp:"Voice name to use (e.g. 'Kore', 'Puck', 'Fenrir', etc. - see documentation for full list of 30 voices, default: 'Zephyr')"`
+	Model *string `json:"model,omitempty" mcp:"TTS model to use (gemini-2.5-flash-preview-tts, gemini-2.5-pro-preview-tts, gemini-2.5-flash-lite-preview-tts; default: 'gemini-2.5-flash-preview-tts')"`
 }
 
 type OpenAITTSParams struct {
 	Text         string   `json:"text" mcp:"The text to convert to speech using OpenAI TTS"`
 	Voice        *string  `json:"voice,omitempty" mcp:"Voice to use (alloy, ash, ballad, coral, echo, fable, nova, onyx, sage, shimmer, verse; default: 'alloy')"`
-	Model        *string  `json:"model,omitempty" mcp:"TTS model to use (gpt-4o-mini-tts, gpt-4o-audio-preview; default: 'gpt-4o-mini-tts')"`
+	Model        *string  `json:"model,omitempty" mcp:"TTS model to use (gpt-4o-mini-tts, gpt-4o-audio-preview, tts-1, tts-1-hd; default: 'gpt-4o-mini-tts')"`
 	Speed        *float64 `json:"speed,omitempty" mcp:"Speech speed (0.25-4.0, default: 1.0)"`
 	Instructions *string  `json:"instructions,omitempty" mcp:"Instructions for voice modulation and style"`
 }
