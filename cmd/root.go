@@ -133,7 +133,7 @@ type GoogleTTSParams struct {
 type OpenAITTSParams struct {
 	Text         string   `json:"text" mcp:"The text to convert to speech using OpenAI TTS"`
 	Voice        *string  `json:"voice,omitempty" mcp:"Voice to use (alloy, ash, ballad, coral, echo, fable, nova, onyx, sage, shimmer, verse; default: 'alloy')"`
-	Model        *string  `json:"model,omitempty" mcp:"TTS model to use (gpt-4o-mini-tts, gpt-4o-audio-preview, tts-1, tts-1-hd; default: 'gpt-4o-mini-tts')"`
+	Model        *string  `json:"model,omitempty" mcp:"TTS model to use (gpt-4o-mini-tts-2025-12-15, gpt-4o-mini-tts, gpt-4o-audio-preview, tts-1, tts-1-hd; default: 'gpt-4o-mini-tts-2025-12-15')"`
 	Speed        *float64 `json:"speed,omitempty" mcp:"Speech speed (0.25-4.0, default: 1.0)"`
 	Instructions *string  `json:"instructions,omitempty" mcp:"Instructions for voice modulation and style"`
 }
@@ -759,7 +759,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 				voice = *input.Voice
 			}
 
-			model := "gpt-4o-mini-tts"
+			model := "gpt-4o-mini-tts-2025-12-15"
 			if input.Model != nil && *input.Model != "" {
 				model = *input.Model
 			}

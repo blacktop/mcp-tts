@@ -107,8 +107,8 @@ func buildOpenAITTSSchema() json.RawMessage {
 			},
 			"model": map[string]any{
 				"type":        "string",
-				"description": "TTS model to use (gpt-4o-mini-tts, gpt-4o-audio-preview, tts-1, tts-1-hd; default: 'gpt-4o-mini-tts')",
-				"enum":        []string{"gpt-4o-mini-tts", "gpt-4o-audio-preview", "tts-1", "tts-1-hd"},
+				"description": "TTS model to use (gpt-4o-mini-tts-2025-12-15, gpt-4o-mini-tts, gpt-4o-audio-preview, tts-1, tts-1-hd; default: 'gpt-4o-mini-tts-2025-12-15')",
+				"enum":        []string{"gpt-4o-mini-tts-2025-12-15", "gpt-4o-mini-tts", "gpt-4o-audio-preview", "tts-1", "tts-1-hd"},
 			},
 			"speed": map[string]any{
 				"type":        "number",
