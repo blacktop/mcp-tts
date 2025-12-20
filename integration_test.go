@@ -333,9 +333,9 @@ func TestMCPIntegration_SayTTS(t *testing.T) {
 	defer runner.Close()
 
 	args := SayTTSArgs{
-		Text:  "Hello! This is a test of the macOS say command.",
-		Rate:  intPtr(200),
-		Voice: stringPtr("Alex"),
+		Text: "Hello! This is a test of the macOS say command.",
+		Rate: intPtr(200),
+		// Don't specify voice - use system default to avoid "voice not installed" errors
 	}
 
 	response, err := runner.callTool(3, "say_tts", args)

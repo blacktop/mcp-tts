@@ -269,6 +269,19 @@ Designed to be used with the MCP (Model Context Protocol).`,
 							}, nil, nil
 						}
 					}
+
+					// Check if the voice is installed on the system
+					installed, err := IsVoiceInstalled(voice)
+					if err != nil {
+						log.Warn("Failed to check voice availability", "error", err, "voice", voice)
+						// Continue anyway - the say command will fall back to default voice
+					} else if !installed {
+						return &mcp.CallToolResult{
+							Content: []mcp.Content{&mcp.TextContent{Text: VoiceNotInstalledError(voice)}},
+							IsError: true,
+						}, nil, nil
+					}
+
 					args = append(args, "--voice", voice)
 				}
 
