@@ -18,3 +18,8 @@ release:
 snapshot:
 	@echo "🚀 Snapshot Version $(shell svu current)"
 	goreleaser --clean --timeout 60m --snapshot
+
+.PHONY: test
+test:
+	@echo "🧪 Running Tests..."
+	go test -v ./...
