@@ -113,6 +113,89 @@ func acquireTTSLock(ctx context.Context) (release func(), err error) {
 	}
 }
 
+// progressReporter sends progress notifications to the client during audio playback
+type progressReporter struct {
+	session       *mcp.ServerSession
+	progressToken any
+	total         int
+	sampleRate    int
+	lastPercent   int
+	ctx           context.Context
+	cancel        context.CancelFunc
+	done          chan struct{}
+}
+
+// newProgressReporter creates a progress reporter if the client provided a progress token
+func newProgressReporter(ctx context.Context, req *mcp.CallToolRequest, total int, sampleRate int) *progressReporter {
+	if req == nil || req.Session == nil {
+		return nil
+	}
+	token := req.Params.GetProgressToken()
+	if token == nil {
+		return nil
+	}
+	prCtx, cancel := context.WithCancel(ctx)
+	return &progressReporter{
+		session:       req.Session,
+		progressToken: token,
+		total:         total,
+		sampleRate:    sampleRate,
+		lastPercent:   -1,
+		ctx:           prCtx,
+		cancel:        cancel,
+		done:          make(chan struct{}),
+	}
+}
+
+// start begins polling the position function and sending progress updates
+func (pr *progressReporter) start(getPosition func() int) {
+	if pr == nil {
+		return
+	}
+	go func() {
+		defer close(pr.done)
+		ticker := time.NewTicker(250 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-pr.ctx.Done():
+				return
+			case <-ticker.C:
+				pos := getPosition()
+				percent := 0
+				if pr.total > 0 {
+					percent = (pos * 100) / pr.total
+				}
+				// Only send updates when percent changes (reduces noise)
+				if percent != pr.lastPercent {
+					pr.lastPercent = percent
+					durationSec := float64(pos) / float64(pr.sampleRate)
+					totalSec := float64(pr.total) / float64(pr.sampleRate)
+					msg := fmt.Sprintf("Playing: %.1fs / %.1fs", durationSec, totalSec)
+					if err := pr.session.NotifyProgress(pr.ctx, &mcp.ProgressNotificationParams{
+						ProgressToken: pr.progressToken,
+						Progress:      float64(pos),
+						Total:         float64(pr.total),
+						Message:       msg,
+					}); err != nil {
+						log.Debug("Failed to send progress notification", "error", err)
+					}
+				}
+			}
+		}
+	}()
+}
+
+// stop terminates the progress reporter
+func (pr *progressReporter) stop() {
+	if pr == nil {
+		return
+	}
+	pr.cancel()
+	<-pr.done
+}
+
 // Parameter types for tools with MCP schema descriptions for LLMs
 type SayTTSParams struct {
 	Text  string  `json:"text" mcp:"The text to speak aloud"`
@@ -198,21 +281,62 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			log.Debug("Concurrent TTS enabled - multiple speech operations allowed simultaneously")
 		}
 
-		// Create a new MCP server
+		// Create a new MCP server with icon (v1.2.0 feature)
+		// Service icons as base64-encoded SVG data URIs
+		// Server icon: talking person with sound waves
+		serverIcon := mcp.Icon{
+			Source:   "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxjaXJjbGUgY3g9IjkiIGN5PSI3IiByPSI0Ii8+PHBhdGggZD0iTTMgMjF2LTJhNCA0IDAgMCAxIDQtNGg0YTQgNCAwIDAgMSA0IDR2MiIvPjxwYXRoIGQ9Ik0xNiAxMXMxIDEgMiAxIDItMSAyLTEiLz48cGF0aCBkPSJNMTkgOGMxLjUgMS41IDEuNSAzLjUgMCA1Ii8+PHBhdGggZD0iTTIxLjUgNS41YzMgMyAzIDcuNSAwIDEwLjUiLz48L3N2Zz4=",
+			MIMEType: "image/svg+xml",
+			Sizes:    []string{"24x24"},
+		}
+		// Apple logo for macOS say
+		appleIcon := mcp.Icon{
+			Source:   "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0Ij48cGF0aCBmaWxsPSJjdXJyZW50Q29sb3IiIGQ9Ik0xNy4wNSAyMC4yOGMtLjk4Ljk1LTIuMDUuOC0zLjA4LjM1LTEuMDktLjQ2LTIuMDktLjQ4LTMuMjQgMC0xLjQ0LjYyLTIuMi41NS0zLjA2LS4zNS0zLjEtMy4yMy0zLjcxLTEwLjIzIDIuMTgtMTAuMjMgMS40OC0uMDEgMi41Ljc4IDMuMzYuODMgMS40OS0uMDQgMi41My0uODMgMy42LS44MyAxLjEgMCAyLjA4LjgzIDMuNTguODMgMS4xNSAwIDIuNC0uNSAzLjM2LS44MyAxLjA0LS4wNSAyLjEuNDMgMi45NiAxLjI1LTIuNyAxLjYtMi4yNSA1LjYuNDcgNi43LS41NSAxLjUtMS4yNyAyLjk1LTIuMTMgMy40NXpNMTIuMDMgNy4yNWMtLjE1LTIuMjMgMS42Ni00LjA3IDMuNzQtNC4yNS4yOSAyLjU4LTIuMzQgNC41LTMuNzQgNC4yNXoiLz48L3N2Zz4=",
+			MIMEType: "image/svg+xml",
+			Sizes:    []string{"24x24"},
+		}
+		// OpenAI logo
+		openaiIcon := mcp.Icon{
+			Source:   "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0Ij48cGF0aCBmaWxsPSJjdXJyZW50Q29sb3IiIGQ9Ik0yMi40MTggOS44MjJhNS45MDQgNS45MDQgMCAwIDAtLjUyLTQuOTEgNi4xIDYuMSAwIDAgMC0yLjgyMi0yLjQ0IDYuMiA2LjIgMCAwIDAtMy43NjktLjQzNCA2IDYgMCAwIDAtMy40NjYtMS41MyA2LjE1IDYuMTUgMCAwIDAtMy4zMDYuNDcxQTYuMSA2LjEgMCAwIDAgNS45NzQgMy41MSA2IDYgMCAwIDAgMS45OTggNy4zMzdhNS45IDUuOSAwIDAgMCAuNzI0IDQuNTI0IDUuOSA1LjkgMCAwIDAgLjUyIDQuOTExIDYuMSA2LjEgMCAwIDAgMi44MjIgMi40NGE2LjIgNi4yIDAgMCAwIDMuNzY5LjQzNCA2LjA1IDYuMDUgMCAwIDAgMy4zNjUgMS41MyA2LjE1IDYuMTUgMCAwIDAgMy4zMDUtLjQ3IDYuMSA2LjEgMCAwIDAgMi41NjQtMi4wMDIgNiA2IDAgMCAwIDMuOTc2LTMuODI2IDUuOSA1LjkgMCAwIDAtLjcyNS00LjU1NnptLTkuMTQyIDEyLjAzYTQuNTcgNC41NyAwIDAgMS0yLjk3NS0xLjA5MmMuMDM4LS4wMjEuMTA0LS4wNTcuMTQ3LS4wODNsNC45MzktMi44NTRhLjguOCAwIDAgMCAuNDA2LS42OTRWMTAuMjZsMS4wNDUuNjAzYS4wNzUuMDc1IDAgMCAxIC4wNC4wNjd2NS43N2E0LjU5IDQuNTkgMCAwIDEtNC41OTUgNC41ODNsLTEuMDA3LS40M3pNMy44NzcgMTcuNjVhNC41NiA0LjU2IDAgMCAxLS41NDctMy4wNzZjLjAzNy4wMjMuMTAyLjA2LjE0OC4wODVsNC45MzggMi44NTJhLjgxNi44MTYgMCAwIDAgLjgxMiAwbDYuMDMtMy40ODJ2MS4yMDdhLjA3My4wNzMgMCAwIDEtLjAyOS4wNjJsLTQuOTkzIDIuODgzYTQuNiA0LjYgMCAwIDEtNi4zNTktMS41M1pNMi41MDYgNy44NmE0LjU2IDQuNTYgMCAwIDEgMi4zODItMi4wMDd2NS44NzNhLjc3Mi43NzIgMCAwIDAgLjQwNS42NzRsNi4wMyAzLjQ4MWwtMS4wNDcuNjA0YS4wNzUuMDc1IDAgMCAxLS4wNjkuMDA1bC00Ljk5NC0yLjg4NmE0LjU5IDQuNTkgMCAwIDEtMS43MDctNi4yNzR6bTE2LjU2MiAzLjg1NC02LjAzLTMuNDgzIDEuMDQ3LS42MDJhLjA3NS4wNzUgMCAwIDEgLjA2OS0uMDA1bDQuOTk0IDIuODgzYTQuNTcgNC41NyAwIDAgMS0uNzEyIDguMjU3di01Ljg3YS44LjggMCAwIDAtLjQwNS0uNzEzbC4wMzctLjQ2N3ptMS4wNDMtMy4wODVhNS44IDUuOCAwIDAgMC0uMTQ4LS4wODVsLTQuOTM4LTIuODUyYS44MTYuODE2IDAgMCAwLS44MTIgMGwtNi4wMyAzLjQ4MlY4LjA3YS4wNy4wNyAwIDAgMSAuMDI4LS4wNjJsNC45OTQtMi44ODRhNC41OSA0LjU5IDAgMCAxIDYuOTA2IDQuNzM2Wm0tNi41NCAzLjk1OC0xLjA0Ni0uNjAzYS4wNzQuMDc0IDAgMCAxLS4wNC0uMDY2VjYuMTQ4YTQuNjQgNC42NCAwIDAgMSA3LjU3LTMuNTQ2IDUuNiA1LjYgMCAwIDAtLjE0Ni4wODNsLTQuOTQgMi44NTRhLjguOCAwIDAgMC0uNDA1LjY5NHY1Ljg1bC4wMDctLjQ1em0uNTY4LTEuOTQgMi42ODYtMS41NTEgMi42ODYgMS41NXY3LjYzM2wtMi42ODYgMS41NTEtMi42ODYtMS41NTFWMTAuNjM3eiIvPjwvc3ZnPg==",
+			MIMEType: "image/svg+xml",
+			Sizes:    []string{"24x24"},
+		}
+		// Google/Gemini icon (sparkle/star shape)
+		googleIcon := mcp.Icon{
+			Source:   "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0Ij48cGF0aCBmaWxsPSIjNDI4NUY0IiBkPSJNMTIgMkM2LjQ4IDIgMiA2LjQ4IDIgMTJzNC40OCAxMCAxMCAxMCAxMC00LjQ4IDEwLTEwUzE3LjUyIDIgMTIgMnptNS40NiAxMy40NWwtMy4wOC0xLjc4Yy0uMy0uMTctLjY3LS4xNy0uOTcgMEwxMC4zMyAxNS40NWMtLjMuMTctLjY3LjE3LS45NyAwbC0zLjA4LTEuNzhhLjk3Ljk3IDAgMCAxLS40OC0uODRWOC4xN2MwLS4zNS4xOC0uNjcuNDgtLjg0bDMuMDgtMS43OGMuMy0uMTcuNjctLjE3Ljk3IDBsMy4wOCAxLjc4Yy4zLjE3LjQ4LjQ5LjQ4Ljg0djQuNjZjMCAuMzUtLjE4LjY3LS40OC44NHoiLz48L3N2Zz4=",
+			MIMEType: "image/svg+xml",
+			Sizes:    []string{"24x24"},
+		}
+		// ElevenLabs icon (stylized "XI" or wave pattern)
+		elevenLabsIcon := mcp.Icon{
+			Source:   "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0Ij48cGF0aCBmaWxsPSJjdXJyZW50Q29sb3IiIGQ9Ik03IDRoMnYxNkg3em04IDBoMnYxNmgtMnoiLz48L3N2Zz4=",
+			MIMEType: "image/svg+xml",
+			Sizes:    []string{"24x24"},
+		}
 		impl := &mcp.Implementation{
-			Name:    "Say TTS Service",
-			Version: Version,
+			Name:       "mcp-tts",
+			Title:      "Text-to-Speech",
+			Version:    Version,
+			WebsiteURL: "https://github.com/blacktop/mcp-tts",
+			Icons:      []mcp.Icon{serverIcon},
 		}
 		s := mcp.NewServer(impl, nil)
 
 		// Prompt functionality removed - focusing on tools with new SDK
 
 		if runtime.GOOS == "darwin" {
-			// Add the "say_tts" tool
+			// Add the "say_tts" tool with v1.2.0 features
 			sayTool := &mcp.Tool{
 				Name:        "say_tts",
+				Title:       "macOS Say",
 				Description: "Speaks the provided text out loud using the macOS text-to-speech engine",
 				InputSchema: buildSayTTSSchema(),
+				Icons:       []mcp.Icon{appleIcon},
+				Annotations: &mcp.ToolAnnotations{
+					Title:          "macOS Text-to-Speech",
+					ReadOnlyHint:   false, // Produces audio output
+					IdempotentHint: true,  // Same text = same speech
+				},
 			}
 
 			// Add the say tool handler
@@ -354,8 +478,15 @@ Designed to be used with the MCP (Model Context Protocol).`,
 
 		elevenLabsTool := &mcp.Tool{
 			Name:        "elevenlabs_tts",
+			Title:       "ElevenLabs",
 			Description: "Uses the ElevenLabs API to generate speech from text",
 			InputSchema: buildElevenLabsTTSSchema(),
+			Icons:       []mcp.Icon{elevenLabsIcon},
+			Annotations: &mcp.ToolAnnotations{
+				Title:          "ElevenLabs Text-to-Speech",
+				ReadOnlyHint:   false,
+				IdempotentHint: true,
+			},
 		}
 
 		mcp.AddTool(s, elevenLabsTool, func(ctx context.Context, _ *mcp.CallToolRequest, input ElevenLabsTTSParams) (*mcp.CallToolResult, any, error) {
@@ -581,11 +712,18 @@ Designed to be used with the MCP (Model Context Protocol).`,
 		// Add Google TTS tool
 		googleTTSTool := &mcp.Tool{
 			Name:        "google_tts",
+			Title:       "Google Gemini",
 			Description: "Uses Google's dedicated Text-to-Speech API with Gemini TTS models",
 			InputSchema: buildGoogleTTSSchema(),
+			Icons:       []mcp.Icon{googleIcon},
+			Annotations: &mcp.ToolAnnotations{
+				Title:          "Google Gemini Text-to-Speech",
+				ReadOnlyHint:   false,
+				IdempotentHint: true,
+			},
 		}
 
-		mcp.AddTool(s, googleTTSTool, func(ctx context.Context, _ *mcp.CallToolRequest, input GoogleTTSParams) (*mcp.CallToolResult, any, error) {
+		mcp.AddTool(s, googleTTSTool, func(ctx context.Context, req *mcp.CallToolRequest, input GoogleTTSParams) (*mcp.CallToolResult, any, error) {
 			// Check for early cancellation
 			select {
 			case <-ctx.Done():
@@ -694,7 +832,8 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			}
 
 			audioData := part.InlineData.Data
-			log.Info("Playing TTS audio via beep speaker", "bytes", len(audioData))
+			totalSamples := len(audioData) / 2 // 16-bit samples = 2 bytes each
+			log.Info("Playing TTS audio via beep speaker", "bytes", len(audioData), "samples", totalSamples)
 
 			// Create PCM stream for beep (Google TTS returns 24kHz PCM)
 			pcmStream := &PCMStream{
@@ -705,6 +844,11 @@ Designed to be used with the MCP (Model Context Protocol).`,
 
 			// Initialize speaker with the sample rate
 			speaker.Init(pcmStream.sampleRate, pcmStream.sampleRate.N(time.Second/10))
+
+			// Start progress reporting if client requested it
+			progress := newProgressReporter(ctx, req, totalSamples, 24000)
+			progress.start(func() int { return pcmStream.position })
+			defer progress.stop()
 
 			// Play the audio with cancellation support
 			done := make(chan bool)
@@ -733,11 +877,18 @@ Designed to be used with the MCP (Model Context Protocol).`,
 		// Add OpenAI TTS tool
 		openaiTTSTool := &mcp.Tool{
 			Name:        "openai_tts",
+			Title:       "OpenAI",
 			Description: "Uses OpenAI's Text-to-Speech API to generate speech from text",
 			InputSchema: buildOpenAITTSSchema(),
+			Icons:       []mcp.Icon{openaiIcon},
+			Annotations: &mcp.ToolAnnotations{
+				Title:          "OpenAI Text-to-Speech",
+				ReadOnlyHint:   false,
+				IdempotentHint: true,
+			},
 		}
 
-		mcp.AddTool(s, openaiTTSTool, func(ctx context.Context, _ *mcp.CallToolRequest, input OpenAITTSParams) (*mcp.CallToolResult, any, error) {
+		mcp.AddTool(s, openaiTTSTool, func(ctx context.Context, req *mcp.CallToolRequest, input OpenAITTSParams) (*mcp.CallToolResult, any, error) {
 			// Check for early cancellation
 			select {
 			case <-ctx.Done():
@@ -856,8 +1007,16 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			}
 			defer streamer.Close()
 
-			log.Debug("Initializing speaker for OpenAI TTS", "sampleRate", format.SampleRate)
+			// Get total length for progress reporting
+			totalSamples := streamer.Len()
+			log.Debug("Initializing speaker for OpenAI TTS", "sampleRate", format.SampleRate, "totalSamples", totalSamples)
 			speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10))
+
+			// Start progress reporting if client requested it
+			progress := newProgressReporter(ctx, req, totalSamples, int(format.SampleRate))
+			progress.start(func() int { return streamer.Position() })
+			defer progress.stop()
+
 			done := make(chan bool)
 			speaker.Play(beep.Seq(streamer, beep.Callback(func() {
 				done <- true
@@ -885,7 +1044,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			}
 		})
 
-		log.Info("Starting MCP server", "name", "Say TTS Service", "version", Version)
+		log.Info("Starting MCP server", "name", "mcp-tts", "version", Version)
 		// Start the server using stdin/stdout
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
