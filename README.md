@@ -269,6 +269,34 @@ cat test/sequential.json | go run main.go --verbose
 cat test/sequential.json | go run main.go --verbose --sequential-tts=false
 ```
 
+## Skill: `speak`
+
+This repo includes a **speak** skill that automatically announces plans, issues, and summaries aloud using TTS. Each project gets a unique voice so you can identify which project is speaking from another room.
+
+### Install Skill
+
+#### Claude Code
+
+```bash
+claude plugin marketplace add blacktop/mcp-tts
+claude plugin install speak
+```
+
+#### Codex CLI
+
+```
+$skill-installer https://github.com/blacktop/mcp-tts --path skills/speak
+```
+
+### How It Works
+
+The skill triggers automatically after:
+- **Planning complete** - When a plan/todo list is finalized
+- **Issue resolved** - When a bug fix or error is resolved
+- **Summary generated** - When completing a major task
+
+Providers fallback in order: `google` → `openai` → `elevenlabs` → `say` (macOS). If a provider fails due to missing API keys, it's marked unavailable and skipped in future attempts.
+
 ## License
 
 MIT Copyright (c) 2025 **blacktop**

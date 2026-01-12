@@ -1,0 +1,74 @@
+{
+  "google": {
+    "planning": [
+      { "voice": "Kore", "description": "calm, professional" },
+      { "voice": "Charon", "description": "deep, thoughtful" },
+      { "voice": "Zephyr", "description": "light, organized" },
+      { "voice": "Orus", "description": "steady, clear" },
+      { "voice": "Puck", "description": "bright, energetic" },
+      { "voice": "Fenrir", "description": "strong, confident" },
+      { "voice": "Umbriel", "description": "soft, measured" },
+      { "voice": "Gacrux", "description": "warm, friendly" }
+    ],
+    "issue": [
+      { "voice": "Aoede", "description": "alert, focused" },
+      { "voice": "Schedar", "description": "serious, direct" },
+      { "voice": "Algenib", "description": "sharp, attentive" },
+      { "voice": "Alnilam", "description": "firm, clear" },
+      { "voice": "Rasalgethi", "description": "urgent, precise" },
+      { "voice": "Sadachbia", "description": "crisp, alert" },
+      { "voice": "Achernar", "description": "bright, warning" },
+      { "voice": "Despina", "description": "quick, attentive" }
+    ],
+    "summary": [
+      { "voice": "Pulcherrima", "description": "warm, satisfied" },
+      { "voice": "Vindemiatrix", "description": "accomplished, rich" },
+      { "voice": "Callirrhoe", "description": "pleasant, complete" },
+      { "voice": "Leda", "description": "gentle, conclusive" },
+      { "voice": "Sulafat", "description": "full, rewarding" },
+      { "voice": "Iapetus", "description": "deep, final" },
+      { "voice": "Achird", "description": "bright, closing" },
+      { "voice": "Laomedeia", "description": "smooth, wrapping up" }
+    ]
+  },
+  "openai": {
+    "planning": [
+      { "voice": "sage", "description": "wise, methodical", "instructions": "Speak calmly and clearly, like outlining a well-organized plan" },
+      { "voice": "onyx", "description": "deep, authoritative", "instructions": "Speak with confidence, laying out the roadmap" },
+      { "voice": "echo", "description": "clear, focused", "instructions": "Speak in a measured, organized manner" }
+    ],
+    "issue": [
+      { "voice": "coral", "description": "alert, warm", "instructions": "Speak with gentle urgency, flagging an issue that needs attention" },
+      { "voice": "ash", "description": "direct, serious", "instructions": "Speak directly and clearly about the problem found" },
+      { "voice": "ballad", "description": "expressive, attentive", "instructions": "Speak with concern but reassurance" }
+    ],
+    "summary": [
+      { "voice": "nova", "description": "bright, accomplished", "instructions": "Speak with satisfaction, like wrapping up a job well done" },
+      { "voice": "shimmer", "description": "light, pleased", "instructions": "Speak warmly, celebrating completion" },
+      { "voice": "alloy", "description": "balanced, professional", "instructions": "Speak with quiet pride about what was accomplished" }
+    ]
+  },
+  "say": {
+    "planning": [
+      { "voice": "Alex", "description": "male, American" },
+      { "voice": "Daniel", "description": "male, British" },
+      { "voice": "Fred", "description": "male, quirky" }
+    ],
+    "issue": [
+      { "voice": "Samantha", "description": "female, American" },
+      { "voice": "Victoria", "description": "female, British" },
+      { "voice": "Karen", "description": "female, Australian" }
+    ],
+    "summary": [
+      { "voice": "Tom", "description": "male, American" },
+      { "voice": "Moira", "description": "female, Irish" },
+      { "voice": "Tessa", "description": "female, South African" }
+    ]
+  },
+  "elevenlabs": {
+    "note": "ElevenLabs voice selection is limited by API - uses default voice. Reserve for special cases.",
+    "planning": [{ "voice": "default", "description": "high quality default" }],
+    "issue": [{ "voice": "default", "description": "high quality default" }],
+    "summary": [{ "voice": "default", "description": "high quality default" }]
+  }
+}
