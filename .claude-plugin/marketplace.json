@@ -1,0 +1,19 @@
+{
+  "name": "mcp-tts",
+  "owner": {
+    "name": "blacktop"
+  },
+  "metadata": {
+    "description": "Text-to-Speech skills for automatic announcements using TTS",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "speak",
+      "description": "Automatically announces plans, issues, and summaries aloud using TTS. Each project gets a unique voice.",
+      "source": "./",
+      "strict": false,
+      "skills": ["./skill"]
+    }
+  ]
+}

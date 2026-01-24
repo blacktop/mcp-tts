@@ -273,20 +273,87 @@ cat test/sequential.json | go run main.go --verbose --sequential-tts=false
 
 This repo includes a **speak** skill that automatically announces plans, issues, and summaries aloud using TTS. Each project gets a unique voice so you can identify which project is speaking from another room.
 
+Skills follow the [Agent Skills](https://agentskills.io) open standard and work across Claude Code, Codex CLI, and Gemini CLI.
+
 ### Install Skill
 
 #### Claude Code
 
+**Via Plugin Marketplace** (recommended):
 ```bash
 claude plugin marketplace add blacktop/mcp-tts
-claude plugin install speak
+claude plugin install speak@mcp-tts
 ```
+
+**Or manually:**
+```bash
+mkdir -p ~/.claude/skills
+git clone https://github.com/blacktop/mcp-tts.git /tmp/mcp-tts
+cp -r /tmp/mcp-tts/skill ~/.claude/skills/speak
+```
+
+The skill is now available. Claude will use it automatically when relevant, or invoke directly with `/speak`.
 
 #### Codex CLI
 
+**Using the skill-installer** (within a Codex session):
 ```
-$skill-installer https://github.com/blacktop/mcp-tts --path skills/speak
+$skill-installer install the speak skill from https://github.com/blacktop/mcp-tts --path skill
 ```
+
+**Or manually:**
+```bash
+mkdir -p ~/.codex/skills
+git clone https://github.com/blacktop/mcp-tts.git /tmp/mcp-tts
+cp -r /tmp/mcp-tts/skill ~/.codex/skills/speak
+```
+
+Restart Codex after installing.
+
+#### Gemini CLI
+
+Gemini CLI uses **extensions** to bundle skills. Install this repo as an extension:
+
+```bash
+gemini extensions install https://github.com/blacktop/mcp-tts.git
+```
+
+This installs the `speak` skill.
+
+**Or manually** (skill only):
+```bash
+mkdir -p ~/.gemini/skills
+git clone https://github.com/blacktop/mcp-tts.git /tmp/mcp-tts
+cp -r /tmp/mcp-tts/skill ~/.gemini/skills/speak
+```
+
+> **Note:** Gemini CLI skills are experimental. Enable via `/settings` → search "Skills" → toggle on.
+
+### Shared Skills Directory (Optional)
+
+To maintain one copy across all agents, use symlinks:
+
+```bash
+# Create shared skills directory
+mkdir -p ~/.agents/skills
+
+# Clone and copy
+git clone https://github.com/blacktop/mcp-tts.git /tmp/mcp-tts
+cp -r /tmp/mcp-tts/skill ~/.agents/skills/speak
+
+# Symlink to each agent
+ln -sf ~/.agents/skills/speak ~/.claude/skills/speak
+ln -sf ~/.agents/skills/speak ~/.codex/skills/speak
+ln -sf ~/.agents/skills/speak ~/.gemini/skills/speak
+```
+
+### Verify Installation
+
+| Agent | Command |
+|-------|---------|
+| Claude Code | Ask "What skills are available?" or type `/speak` |
+| Codex CLI | Skills load automatically on restart |
+| Gemini CLI | `gemini extensions list` or check `/settings` for skills |
 
 ### How It Works
 

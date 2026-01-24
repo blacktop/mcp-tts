@@ -1,0 +1,5 @@
+{
+  "name": "mcp-tts",
+  "description": "Text-to-Speech skills for automatic announcements using TTS",
+  "version": "1.0.0"
+}
