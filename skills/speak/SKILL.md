@@ -120,9 +120,13 @@ mcp__mcp-tts__elevenlabs_tts
 ```
 mcp__mcp-tts__say_tts
 - text: string (required)
-- voice: string (e.g., "Alex", "Samantha", "Victoria")
-- rate: integer (50-500 words/min, default: 200)
+- voice: string (OPTIONAL - prefer leaving unset to use system default voice which sounds more natural)
+- rate: integer (RECOMMENDED: 200-250 for natural speech, max 300 unless user asks faster; default: 200)
 ```
+
+**IMPORTANT for say_tts:**
+- Do NOT set a voice unless the user explicitly requests one - the system default sounds most natural
+- Keep rate between 200-250 for comfortable listening; only go up to 275-300 if user wants faster speech
 
 ## Auto-Assignment
 

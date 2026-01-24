@@ -20,13 +20,14 @@ func buildSayTTSSchema() json.RawMessage {
 			},
 			"rate": map[string]any{
 				"type":        "integer",
-				"description": "Speech rate in words per minute (default: 200)",
+				"description": "Speech rate in words per minute. RECOMMENDED: 200-250 for natural speech. Only increase to 275-300 if user explicitly requests faster speech. Do NOT set above 300 unless specifically asked. (default: 200)",
 				"minimum":     50,
 				"maximum":     500,
+				"default":     200,
 			},
 			"voice": map[string]any{
 				"type":        "string",
-				"description": "Voice to use for speech synthesis (default: '')", // empty will use system's TTS currently set voice.
+				"description": "Voice to use for speech synthesis. IMPORTANT: Prefer leaving this unset to use the system's default voice, which sounds more natural. Only set a specific voice if the user explicitly requests one.",
 				"enum": []string{
 					"Isha (Premium)",
 					"Serena (Premium)",
