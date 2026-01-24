@@ -33,37 +33,56 @@
   },
   "openai": {
     "planning": [
-      { "voice": "sage", "description": "wise, methodical", "instructions": "Speak calmly and clearly, like outlining a well-organized plan" },
-      { "voice": "onyx", "description": "deep, authoritative", "instructions": "Speak with confidence, laying out the roadmap" },
+      {
+        "voice": "sage",
+        "description": "wise, methodical",
+        "instructions": "Speak calmly and clearly, like outlining a well-organized plan"
+      },
+      {
+        "voice": "onyx",
+        "description": "deep, authoritative",
+        "instructions": "Speak with confidence, laying out the roadmap"
+      },
       { "voice": "echo", "description": "clear, focused", "instructions": "Speak in a measured, organized manner" }
     ],
     "issue": [
-      { "voice": "coral", "description": "alert, warm", "instructions": "Speak with gentle urgency, flagging an issue that needs attention" },
-      { "voice": "ash", "description": "direct, serious", "instructions": "Speak directly and clearly about the problem found" },
-      { "voice": "ballad", "description": "expressive, attentive", "instructions": "Speak with concern but reassurance" }
+      {
+        "voice": "coral",
+        "description": "alert, warm",
+        "instructions": "Speak with gentle urgency, flagging an issue that needs attention"
+      },
+      {
+        "voice": "ash",
+        "description": "direct, serious",
+        "instructions": "Speak directly and clearly about the problem found"
+      },
+      {
+        "voice": "ballad",
+        "description": "expressive, attentive",
+        "instructions": "Speak with concern but reassurance"
+      }
     ],
     "summary": [
-      { "voice": "nova", "description": "bright, accomplished", "instructions": "Speak with satisfaction, like wrapping up a job well done" },
+      {
+        "voice": "nova",
+        "description": "bright, accomplished",
+        "instructions": "Speak with satisfaction, like wrapping up a job well done"
+      },
       { "voice": "shimmer", "description": "light, pleased", "instructions": "Speak warmly, celebrating completion" },
-      { "voice": "alloy", "description": "balanced, professional", "instructions": "Speak with quiet pride about what was accomplished" }
+      {
+        "voice": "alloy",
+        "description": "balanced, professional",
+        "instructions": "Speak with quiet pride about what was accomplished"
+      }
     ]
   },
   "say": {
-    "planning": [
-      { "voice": "Alex", "description": "male, American" },
-      { "voice": "Daniel", "description": "male, British" },
-      { "voice": "Fred", "description": "male, quirky" }
-    ],
-    "issue": [
-      { "voice": "Samantha", "description": "female, American" },
-      { "voice": "Victoria", "description": "female, British" },
-      { "voice": "Karen", "description": "female, Australian" }
-    ],
-    "summary": [
-      { "voice": "Tom", "description": "male, American" },
-      { "voice": "Moira", "description": "female, Irish" },
-      { "voice": "Tessa", "description": "female, South African" }
-    ]
+    "note": "For macOS say_tts, prefer leaving voice unset to use system default (sounds most natural). Only these downloaded voices are available if explicitly needed.",
+    "available_voices": ["Isha (Premium)", "Serena (Premium)", "Zoe (Premium)", "Evan (Enhanced)"],
+    "recommended_rate": "200-250 (max 300 unless user requests faster)",
+    "planning": [{ "voice": null, "description": "system default - recommended" }],
+    "issue": [{ "voice": null, "description": "system default - recommended" }],
+    "summary": [{ "voice": null, "description": "system default - recommended" }]
   },
   "elevenlabs": {
     "note": "ElevenLabs voice selection is limited by API - uses default voice. Reserve for special cases.",
