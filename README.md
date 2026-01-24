@@ -331,21 +331,15 @@ cp -r /tmp/mcp-tts/skill ~/.gemini/skills/speak
 
 ### Shared Skills Directory (Optional)
 
-To maintain one copy across all agents, use symlinks:
+To maintain one copy across all agents, run the install script:
 
 ```bash
-# Create shared skills directory
-mkdir -p ~/.agents/skills
-
-# Clone and copy
-git clone https://github.com/blacktop/mcp-tts.git /tmp/mcp-tts
-cp -r /tmp/mcp-tts/skill ~/.agents/skills/speak
-
-# Symlink to each agent
-ln -sf ~/.agents/skills/speak ~/.claude/skills/speak
-ln -sf ~/.agents/skills/speak ~/.codex/skills/speak
-ln -sf ~/.agents/skills/speak ~/.gemini/skills/speak
+git clone https://github.com/blacktop/mcp-tts.git
+cd mcp-tts
+./install-skill.sh
 ```
+
+This copies the skill to `~/.agents/skills/speak` and creates symlinks for Claude Code, Codex CLI, and Gemini CLI.
 
 ### Verify Installation
 
