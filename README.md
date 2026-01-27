@@ -277,6 +277,12 @@ Skills follow the [Agent Skills](https://agentskills.io) open standard and work 
 
 ### Install Skill
 
+#### skills.sh
+
+```bash
+npx skills add https://github.com/blacktop/mcp-tts --skill speak
+```
+
 #### Claude Code
 
 **Via Plugin Marketplace** (recommended):
