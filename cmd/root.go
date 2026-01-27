@@ -60,6 +60,10 @@ var (
 	ttsMutex sync.Mutex
 	// Flag to enable/disable sequential TTS (default: true)
 	sequentialTTS bool = true
+	// Speaker is initialized once; all streams resample to the initial rate
+	speakerInitOnce   sync.Once
+	speakerInitErr    error
+	speakerSampleRate beep.SampleRate
 )
 
 // acquireTTSLock attempts to acquire the TTS mutex with context support
@@ -111,6 +115,22 @@ func acquireTTSLock(ctx context.Context) (release func(), err error) {
 		}
 		return nil, ctx.Err()
 	}
+}
+
+// @@@speaker_rate - speaker.Init can only run once; resample all streams to the initial rate.
+func initSpeaker(sampleRate beep.SampleRate) error {
+	speakerInitOnce.Do(func() {
+		speakerSampleRate = sampleRate
+		speakerInitErr = speaker.Init(sampleRate, sampleRate.N(time.Second/10))
+	})
+	return speakerInitErr
+}
+
+func resampleToSpeaker(streamer beep.Streamer, from beep.SampleRate) beep.Streamer {
+	if speakerSampleRate == 0 || from == speakerSampleRate {
+		return streamer
+	}
+	return beep.Resample(4, from, speakerSampleRate, streamer)
 }
 
 // progressReporter sends progress notifications to the client during audio playback
@@ -649,11 +669,16 @@ Designed to be used with the MCP (Model Context Protocol).`,
 				defer streamer.Close()
 
 				log.Debug("Initializing speaker", "sampleRate", format.SampleRate)
-				speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10))
+				if err := initSpeaker(format.SampleRate); err != nil {
+					log.Error("Failed to initialize speaker", "error", err)
+					audioComplete <- fmt.Errorf("failed to initialize speaker: %v", err)
+					return fmt.Errorf("failed to initialize speaker: %v", err)
+				}
+				playback := resampleToSpeaker(streamer, format.SampleRate)
 				done := make(chan bool, 1)
 
 				// Play audio with callback
-				speaker.Play(beep.Seq(streamer, beep.Callback(func() {
+				speaker.Play(beep.Seq(playback, beep.Callback(func() {
 					done <- true
 				})))
 
@@ -843,7 +868,13 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			}
 
 			// Initialize speaker with the sample rate
-			speaker.Init(pcmStream.sampleRate, pcmStream.sampleRate.N(time.Second/10))
+			if err := initSpeaker(pcmStream.sampleRate); err != nil {
+				log.Error("Failed to initialize speaker", "error", err)
+				result := &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("Error: Failed to initialize speaker: %v", err)}}}
+				result.IsError = true
+				return result, nil, nil
+			}
+			playback := resampleToSpeaker(pcmStream, pcmStream.sampleRate)
 
 			// Start progress reporting if client requested it
 			progress := newProgressReporter(ctx, req, totalSamples, 24000)
@@ -852,7 +883,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 
 			// Play the audio with cancellation support
 			done := make(chan bool)
-			speaker.Play(beep.Seq(pcmStream, beep.Callback(func() {
+			speaker.Play(beep.Seq(playback, beep.Callback(func() {
 				done <- true
 			})))
 
@@ -1010,7 +1041,13 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			// Get total length for progress reporting
 			totalSamples := streamer.Len()
 			log.Debug("Initializing speaker for OpenAI TTS", "sampleRate", format.SampleRate, "totalSamples", totalSamples)
-			speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10))
+			if err := initSpeaker(format.SampleRate); err != nil {
+				log.Error("Failed to initialize speaker", "error", err)
+				result := &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("Error: Failed to initialize speaker: %v", err)}}}
+				result.IsError = true
+				return result, nil, nil
+			}
+			playback := resampleToSpeaker(streamer, format.SampleRate)
 
 			// Start progress reporting if client requested it
 			progress := newProgressReporter(ctx, req, totalSamples, int(format.SampleRate))
@@ -1018,7 +1055,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			defer progress.stop()
 
 			done := make(chan bool)
-			speaker.Play(beep.Seq(streamer, beep.Callback(func() {
+			speaker.Play(beep.Seq(playback, beep.Callback(func() {
 				done <- true
 			})))
 
