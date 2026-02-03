@@ -526,7 +526,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 
 			modelID := os.Getenv("ELEVENLABS_MODEL_ID")
 			if modelID == "" {
-				modelID = "eleven_multilingual_v2" // eleven_turbo_v2_5 is also available
+				modelID = "eleven_v3"
 				log.Debug("Model not specified, using default", "modelID", modelID)
 			}
 
