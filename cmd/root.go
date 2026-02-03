@@ -581,9 +581,9 @@ Designed to be used with the MCP (Model Context Protocol).`,
 					Text:    text,
 					ModelID: modelID,
 					VoiceSettings: SynthesisOptions{
-						Stability:       0.60,
+						Stability:       0.5, // Must be 0.0 (Creative), 0.5 (Natural), or 1.0 (Robust)
 						SimilarityBoost: 0.75,
-						Style:           0.50,
+						Style:           0.5,
 						UseSpeakerBoost: false,
 					},
 				}
