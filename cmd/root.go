@@ -117,7 +117,10 @@ func acquireTTSLock(ctx context.Context) (release func(), err error) {
 	}
 }
 
-// @@@speaker_rate - speaker.Init can only run once; resample all streams to the initial rate.
+// initSpeaker initializes the speaker once with the given sample rate.
+// The first TTS call determines the speaker sample rate for the process lifetime.
+// Subsequent calls with different sample rates will have their audio resampled.
+// Common rates: OpenAI/Google=24000Hz, ElevenLabs=44100Hz.
 func initSpeaker(sampleRate beep.SampleRate) error {
 	speakerInitOnce.Do(func() {
 		speakerSampleRate = sampleRate
@@ -126,6 +129,8 @@ func initSpeaker(sampleRate beep.SampleRate) error {
 	return speakerInitErr
 }
 
+// resampleToSpeaker resamples the streamer to match the speaker's sample rate.
+// Must be called after initSpeaker. Returns the original streamer if rates match.
 func resampleToSpeaker(streamer beep.Streamer, from beep.SampleRate) beep.Streamer {
 	if speakerSampleRate == 0 || from == speakerSampleRate {
 		return streamer
