@@ -1041,6 +1041,7 @@ func TestMCPServerCancellation(t *testing.T) {
 			go func(requestID int) {
 				ctx, cancel := context.WithCancel(context.Background())
 
+				defer cancel()
 				params := &TestCallToolParams[SayTTSParams]{
 					Name: "say_tts",
 					Arguments: SayTTSParams{
