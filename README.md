@@ -101,6 +101,31 @@ mcp-tts --suppress-speaking-output
 
 When enabled, tools return "Speech completed" instead of echoing the spoken text.
 
+### Saving Audio to Disk
+
+Save TTS audio output to files instead of (or in addition to) playing them:
+
+**Environment Variables:**
+```bash
+export MCP_TTS_OUTPUT_DIR=/path/to/audio    # Save audio files to this directory
+export MCP_TTS_NO_PLAY=true                  # Skip playback, only save (optional)
+```
+
+**Command Line Flags:**
+```bash
+mcp-tts --output-dir /path/to/audio          # Save and play
+mcp-tts --output-dir /path/to/audio --no-play  # Save only, no playback
+```
+
+Files are saved with unique names: `tts_{timestamp}_{hash}.{ext}`
+
+| Provider | Format |
+|----------|--------|
+| macOS say | AIFF |
+| ElevenLabs | MP3 |
+| Google TTS | WAV |
+| OpenAI TTS | MP3 |
+
 ## Getting Started
 
 ### Install
@@ -131,6 +156,8 @@ Usage:
 
 Flags:
   -h, --help                       help for mcp-tts
+      --no-play                    Skip playback, only save (requires --output-dir)
+      --output-dir string          Save audio files to directory (env: MCP_TTS_OUTPUT_DIR)
       --sequential-tts             Enforce sequential TTS (prevent concurrent speech) (default true)
       --suppress-speaking-output   Suppress 'Speaking:' text output
   -v, --verbose                    Enable verbose debug logging
@@ -214,6 +241,8 @@ Or manually add to `~/.gemini/settings.json` (or `.gemini/settings.json` in proj
 - `OPENAI_TTS_INSTRUCTIONS`: Custom voice instructions for OpenAI TTS (optional, e.g., "Speak in a cheerful and positive tone")
 - `MCP_TTS_SUPPRESS_SPEAKING_OUTPUT`: Set to "true" to suppress "Speaking:" output (optional)
 - `MCP_TTS_ALLOW_CONCURRENT`: Set to "true" to allow concurrent TTS operations (optional, defaults to sequential)
+- `MCP_TTS_OUTPUT_DIR`: Directory to save audio files (optional)
+- `MCP_TTS_NO_PLAY`: Set to "true" to skip playback when saving (optional, requires `MCP_TTS_OUTPUT_DIR`)
 
 ### Test
 

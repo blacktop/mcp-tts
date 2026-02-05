@@ -31,6 +31,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"time"
@@ -64,6 +65,9 @@ var (
 	speakerInitOnce   sync.Once
 	speakerInitErr    error
 	speakerSampleRate beep.SampleRate
+	// Audio saving options
+	outputDir string // Directory to save audio files
+	noPlay    bool   // Skip playback when saving
 )
 
 // acquireTTSLock attempts to acquire the TTS mutex with context support.
@@ -230,13 +234,6 @@ func textResult(msg string) *mcp.CallToolResult {
 	}
 }
 
-func speechResult(text string) *mcp.CallToolResult {
-	if suppressSpeakingOutput {
-		return textResult("Speech completed")
-	}
-	return textResult(fmt.Sprintf("Speaking: %s", text))
-}
-
 // Parameter types for tools with MCP schema descriptions for LLMs
 type SayTTSParams struct {
 	Text  string  `json:"text" mcp:"The text to speak aloud"`
@@ -280,6 +277,8 @@ func init() {
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose debug logging")
 	rootCmd.PersistentFlags().BoolVar(&suppressSpeakingOutput, "suppress-speaking-output", false, "Suppress 'Speaking:' text output")
 	rootCmd.PersistentFlags().BoolVar(&sequentialTTS, "sequential-tts", true, "Enforce sequential TTS (prevent concurrent speech)")
+	rootCmd.PersistentFlags().StringVar(&outputDir, "output-dir", "", "Save audio files to directory (env: MCP_TTS_OUTPUT_DIR)")
+	rootCmd.PersistentFlags().BoolVar(&noPlay, "no-play", false, "Skip playback, only save (requires --output-dir)")
 
 	// Check environment variable for suppressing output
 	if os.Getenv("MCP_TTS_SUPPRESS_SPEAKING_OUTPUT") == "true" {
@@ -289,6 +288,16 @@ func init() {
 	// Check environment variable for concurrent TTS
 	if os.Getenv("MCP_TTS_ALLOW_CONCURRENT") == "true" {
 		sequentialTTS = false
+	}
+
+	// Check environment variable for output directory
+	if dir := os.Getenv("MCP_TTS_OUTPUT_DIR"); dir != "" && outputDir == "" {
+		outputDir = dir
+	}
+
+	// Check environment variable for no-play mode
+	if os.Getenv("MCP_TTS_NO_PLAY") == "true" {
+		noPlay = true
 	}
 }
 
@@ -313,6 +322,26 @@ Designed to be used with the MCP (Model Context Protocol).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if verbose {
 			log.SetLevel(log.DebugLevel)
+		}
+
+		// Validate --no-play requires --output-dir
+		if noPlay && outputDir == "" {
+			return fmt.Errorf("--no-play requires --output-dir to be set")
+		}
+
+		// Validate output directory exists and is a directory
+		if outputDir != "" {
+			info, err := os.Stat(outputDir)
+			if err != nil {
+				if os.IsNotExist(err) {
+					return fmt.Errorf("output directory does not exist: %s", outputDir)
+				}
+				return fmt.Errorf("failed to access output directory: %w", err)
+			}
+			if !info.IsDir() {
+				return fmt.Errorf("output path is not a directory: %s", outputDir)
+			}
+			log.Debug("Audio saving enabled", "outputDir", outputDir, "noPlay", noPlay)
 		}
 
 		// Log sequential TTS status
@@ -436,6 +465,18 @@ Designed to be used with the MCP (Model Context Protocol).`,
 					}
 				}
 
+				// Handle audio saving for macOS say
+				// Note: say -o writes to file instead of playing (implicit no-play)
+				var savedPath string
+				willPlay := true
+				if shouldSave() {
+					filename := generateFilename(text, "aiff")
+					savedPath = filepath.Join(outputDir, filename)
+					args = append(args, "-o", savedPath)
+					willPlay = false // say -o does not play, only writes
+					log.Debug("Saving audio to file", "path", savedPath)
+				}
+
 				args = append(args, text)
 
 				log.Debug("Executing say command", "args", args)
@@ -461,7 +502,17 @@ Designed to be used with the MCP (Model Context Protocol).`,
 						return errorResult(fmt.Sprintf("Error: Say command failed: %v", err)), nil, nil
 					}
 					log.Info("Speaking text completed", "text", text)
-					return speechResult(text), nil, nil
+					// If we saved but didn't play, and user wants playback too, play the saved file
+					if savedPath != "" && shouldPlay() {
+						log.Debug("Playing saved AIFF file", "path", savedPath)
+						playCmd := exec.CommandContext(ctx, "afplay", savedPath)
+						if playErr := playCmd.Run(); playErr != nil {
+							log.Warn("Failed to play saved audio", "error", playErr)
+						} else {
+							willPlay = true
+						}
+					}
+					return textResult(formatSaveResult(text, savedPath, willPlay)), nil, nil
 				case <-ctx.Done():
 					log.Info("Say command cancelled by user")
 					return textResult("Say command cancelled"), nil, nil
@@ -520,7 +571,21 @@ Designed to be used with the MCP (Model Context Protocol).`,
 				return errorResult("Error: ELEVENLABS_API_KEY is not set"), nil, nil
 			}
 
-			pipeReader, pipeWriter := io.Pipe()
+			shouldPlayNow := shouldPlay()
+			shouldSaveNow := shouldSave()
+			noPlaySave := !shouldPlayNow && shouldSaveNow
+
+			// Buffer to capture MP3 data if saving is enabled
+			var mp3Buffer *bytes.Buffer
+			if shouldSaveNow {
+				mp3Buffer = &bytes.Buffer{}
+			}
+
+			var pipeReader *io.PipeReader
+			var pipeWriter *io.PipeWriter
+			if shouldPlayNow {
+				pipeReader, pipeWriter = io.Pipe()
+			}
 
 			// Channel to signal when HTTP response status has been validated
 			statusValidated := make(chan error, 1)
@@ -538,14 +603,18 @@ Designed to be used with the MCP (Model Context Protocol).`,
 						err = context.Canceled
 					}
 					cancelReq()
-					if closeErr := pipeReader.CloseWithError(err); closeErr != nil {
-						log.Debug("Failed to close ElevenLabs pipe reader", "error", closeErr)
+					if pipeReader != nil {
+						if closeErr := pipeReader.CloseWithError(err); closeErr != nil {
+							log.Debug("Failed to close ElevenLabs pipe reader", "error", closeErr)
+						}
 					}
 				})
 			}
 
 			g.Go(func() error {
-				defer pipeWriter.Close()
+				if pipeWriter != nil {
+					defer pipeWriter.Close()
+				}
 
 				url := fmt.Sprintf("https://api.elevenlabs.io/v1/text-to-speech/%s/stream", voiceID)
 
@@ -611,8 +680,29 @@ Designed to be used with the MCP (Model Context Protocol).`,
 				// HTTP status is OK, signal success and proceed with streaming
 				statusValidated <- nil
 
+				if noPlaySave {
+					log.Debug("Copying response body to buffer")
+					var reader io.Reader = res.Body
+					if mp3Buffer != nil {
+						reader = io.TeeReader(res.Body, mp3Buffer)
+					}
+					bytesWritten, err := io.Copy(io.Discard, reader)
+					log.Debug("Response body copied", "bytes", bytesWritten)
+					return err
+				}
+
 				log.Debug("Copying response body to pipe")
-				bytesWritten, err := io.Copy(pipeWriter, res.Body)
+				var bytesWritten int64
+				if pipeWriter == nil {
+					return fmt.Errorf("missing pipe writer for playback")
+				}
+				if mp3Buffer != nil {
+					// Use TeeReader to capture MP3 data while streaming
+					tee := io.TeeReader(res.Body, mp3Buffer)
+					bytesWritten, err = io.Copy(pipeWriter, tee)
+				} else {
+					bytesWritten, err = io.Copy(pipeWriter, res.Body)
+				}
 				log.Debug("Response body copied", "bytes", bytesWritten)
 				return err
 			})
@@ -627,6 +717,24 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			case <-ctx.Done():
 				log.Error("Context cancelled while waiting for HTTP status validation")
 				return errorResult("Error: Request cancelled"), nil, nil
+			}
+
+			// Handle no-play mode: buffer stream and save without playback
+			if noPlaySave {
+				log.Debug("No-play mode: buffering stream for save")
+				// Wait for HTTP goroutine to complete (it will copy to mp3Buffer)
+				if err := g.Wait(); err != nil && err != context.Canceled {
+					log.Error("Error occurred during streaming", "error", err)
+					return errorResult(fmt.Sprintf("Error: %v", err)), nil, nil
+				}
+				// Save the MP3 file
+				savedPath, saveErr := saveMP3(mp3Buffer.Bytes(), text)
+				if saveErr != nil {
+					log.Error("Failed to save MP3 file", "error", saveErr)
+					return errorResult(fmt.Sprintf("Error saving audio: %v", saveErr)), nil, nil
+				}
+				log.Info("Audio saved", "path", savedPath)
+				return textResult(formatSaveResult(text, savedPath, false)), nil, nil
 			}
 
 			// Start audio playback in a separate goroutine with cancellation support
@@ -702,7 +810,20 @@ Designed to be used with the MCP (Model Context Protocol).`,
 				return errorResult(fmt.Sprintf("Error: %v", err)), nil, nil
 			}
 
-			return speechResult(text), nil, nil
+			// Save the MP3 file if enabled
+			var savedPath string
+			if shouldSave() && mp3Buffer != nil {
+				var saveErr error
+				savedPath, saveErr = saveMP3(mp3Buffer.Bytes(), text)
+				if saveErr != nil {
+					log.Error("Failed to save MP3 file", "error", saveErr)
+					// Don't fail the request, just log the error
+				} else {
+					log.Info("Audio saved", "path", savedPath)
+				}
+			}
+
+			return textResult(formatSaveResult(text, savedPath, true)), nil, nil
 		})
 
 		// Add Google TTS tool
@@ -809,6 +930,25 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			log.Info("Playing TTS audio via beep speaker", "bytes", len(audioData), "samples", totalSamples)
 
 			const googleTTSSampleRate = 24000
+
+			// Save WAV file if enabled (do this before playback so file is ready even if cancelled)
+			var savedPath string
+			if shouldSave() {
+				var saveErr error
+				savedPath, saveErr = saveWAV(audioData, googleTTSSampleRate, text)
+				if saveErr != nil {
+					log.Error("Failed to save WAV file", "error", saveErr)
+					// Don't fail the request, just log the error
+				} else {
+					log.Info("Audio saved", "path", savedPath)
+				}
+			}
+
+			// Handle no-play mode: just save and return
+			if !shouldPlay() {
+				return textResult(formatSaveResult(text, savedPath, false)), nil, nil
+			}
+
 			pcmStream := &PCMStream{
 				data:       audioData,
 				sampleRate: beep.SampleRate(googleTTSSampleRate),
@@ -835,10 +975,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			select {
 			case <-done:
 				log.Debug("Google TTS audio playback completed normally")
-				if suppressSpeakingOutput {
-					return textResult("Speech completed"), nil, nil
-				}
-				return textResult(fmt.Sprintf("Speaking: %s (via Google TTS with voice %s)", text, voice)), nil, nil
+				return textResult(formatSaveResult(text, savedPath, true)), nil, nil
 			case <-ctx.Done():
 				log.Debug("Context cancelled, stopping Google TTS audio playback")
 				speaker.Clear()
@@ -944,8 +1081,34 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			}
 			defer response.Body.Close()
 
+			// Buffer the response body so we can both save and decode it
+			audioData, err := io.ReadAll(response.Body)
+			if err != nil {
+				log.Error("Failed to read OpenAI TTS response", "error", err)
+				return errorResult(fmt.Sprintf("Error: Failed to read response: %v", err)), nil, nil
+			}
+			log.Debug("OpenAI TTS audio data received", "bytes", len(audioData))
+
+			// Save MP3 file if enabled (do this before playback)
+			var savedPath string
+			if shouldSave() {
+				var saveErr error
+				savedPath, saveErr = saveMP3(audioData, text)
+				if saveErr != nil {
+					log.Error("Failed to save MP3 file", "error", saveErr)
+					// Don't fail the request, just log the error
+				} else {
+					log.Info("Audio saved", "path", savedPath)
+				}
+			}
+
+			// Handle no-play mode: just save and return
+			if !shouldPlay() {
+				return textResult(formatSaveResult(text, savedPath, false)), nil, nil
+			}
+
 			log.Debug("Decoding MP3 stream from OpenAI")
-			streamer, format, err := mp3.Decode(response.Body)
+			streamer, format, err := mp3.Decode(io.NopCloser(bytes.NewReader(audioData)))
 			if err != nil {
 				log.Error("Failed to decode OpenAI TTS response", "error", err)
 				return errorResult(fmt.Sprintf("Error: Failed to decode response: %v", err)), nil, nil
@@ -978,10 +1141,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			select {
 			case <-done:
 				log.Debug("OpenAI TTS audio playback completed normally")
-				if suppressSpeakingOutput {
-					return textResult("Speech completed"), nil, nil
-				}
-				return textResult(fmt.Sprintf("Speaking: %s (via OpenAI TTS with voice %s)", text, voice)), nil, nil
+				return textResult(formatSaveResult(text, savedPath, true)), nil, nil
 			case <-ctx.Done():
 				log.Debug("Context cancelled, stopping OpenAI TTS audio playback")
 				speaker.Clear()
