@@ -858,7 +858,7 @@ func callCancellableSayTTSHandler(ctx context.Context, params *TestCallToolParam
 	}
 
 	// Simulate some processing time with cancellation checks
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		select {
 		case <-ctx.Done():
 			return &TestCallToolResult{
@@ -907,7 +907,7 @@ func callCancellableGoogleTTSHandler(ctx context.Context, params *TestCallToolPa
 	}
 
 	// Simulate processing with cancellation checks
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		select {
 		case <-ctx.Done():
 			return &TestCallToolResult{
@@ -957,7 +957,7 @@ func callCancellableOpenAITTSHandler(ctx context.Context, params *TestCallToolPa
 	}
 
 	// Simulate processing with cancellation checks
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		select {
 		case <-ctx.Done():
 			return &TestCallToolResult{
@@ -1007,7 +1007,7 @@ func callCancellableElevenLabsTTSHandler(ctx context.Context, params *TestCallTo
 	}
 
 	// Simulate processing with cancellation checks
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		select {
 		case <-ctx.Done():
 			return &TestCallToolResult{
@@ -1037,7 +1037,7 @@ func TestMCPServerCancellation(t *testing.T) {
 		errors := make(chan error, numRequests)
 
 		// Start multiple concurrent requests
-		for i := 0; i < numRequests; i++ {
+		for i := range numRequests {
 			go func(requestID int) {
 				ctx, cancel := context.WithCancel(context.Background())
 
@@ -1072,7 +1072,7 @@ func TestMCPServerCancellation(t *testing.T) {
 		var completedResults []string
 		var receivedErrors []error
 
-		for i := 0; i < numRequests; i++ {
+		for range numRequests {
 			select {
 			case result := <-results:
 				completedResults = append(completedResults, result)

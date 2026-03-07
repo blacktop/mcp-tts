@@ -1,0 +1,2 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{"elicitation":{"form":{}}},"clientInfo":{"name":"test","version":"1.0.0"}}}
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"tts","arguments":{"text":"Hello from the interactive tts JSONL test."}}}

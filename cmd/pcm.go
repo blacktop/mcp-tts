@@ -69,12 +69,6 @@ func (s *PCMStream) Position() int {
 }
 
 func (s *PCMStream) Seek(p int) error {
-	s.position = p * 2
-	if s.position < 0 {
-		s.position = 0
-	}
-	if s.position >= len(s.data) {
-		s.position = len(s.data)
-	}
+	s.position = min(max(p*2, 0), len(s.data))
 	return nil
 }

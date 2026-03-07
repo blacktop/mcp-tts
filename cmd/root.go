@@ -247,7 +247,7 @@ type ElevenLabsTTSParams struct {
 
 type GoogleTTSParams struct {
 	Text  string  `json:"text" mcp:"The text to convert to speech using Google TTS"`
-	Voice *string `json:"voice,omitempty" mcp:"Voice name to use (e.g. 'Kore', 'Puck', 'Fenrir', etc. - see documentation for full list of 30 voices, default: 'Zephyr')"`
+	Voice *string `json:"voice,omitempty" mcp:"Voice name to use (e.g. 'Kore', 'Puck', 'Fenrir', etc. - see documentation for full list of 30 voices, default: 'Kore')"`
 	Model *string `json:"model,omitempty" mcp:"TTS model to use (gemini-2.5-flash-preview-tts, gemini-2.5-pro-preview-tts, gemini-2.5-flash-lite-preview-tts; default: 'gemini-2.5-flash-preview-tts')"`
 }
 
@@ -257,6 +257,10 @@ type OpenAITTSParams struct {
 	Model        *string  `json:"model,omitempty" mcp:"TTS model to use (gpt-4o-mini-tts-2025-12-15, gpt-4o-mini-tts, gpt-4o-audio-preview, tts-1, tts-1-hd; default: 'gpt-4o-mini-tts-2025-12-15')"`
 	Speed        *float64 `json:"speed,omitempty" mcp:"Speech speed (0.25-4.0, default: 1.0)"`
 	Instructions *string  `json:"instructions,omitempty" mcp:"Instructions for voice modulation and style"`
+}
+
+type TTSParams struct {
+	Text string `json:"text" mcp:"The text to speak aloud"`
 }
 
 func init() {
@@ -410,11 +414,34 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			}
 
 			// Add the say tool handler
-			mcp.AddTool(s, sayTool, func(ctx context.Context, _ *mcp.CallToolRequest, input SayTTSParams) (*mcp.CallToolResult, any, error) {
+			mcp.AddTool(s, sayTool, func(ctx context.Context, req *mcp.CallToolRequest, input SayTTSParams) (*mcp.CallToolResult, any, error) {
 				select {
 				case <-ctx.Done():
 					return textResult("Request cancelled"), nil, nil
 				default:
+				}
+
+				log.Debug("Say tool called", "params", input)
+
+				text := input.Text
+				if text == "" {
+					return errorResult("Error: Empty text provided"), nil, nil
+				}
+
+				// Gather optional settings before taking the global speech lock so
+				// other sessions are not blocked while the user decides.
+				if input.Voice == nil && input.Rate == nil {
+					content, result, stop := maybeElicitContent(
+						ctx,
+						req,
+						"elicit macOS Say settings",
+						"Configure macOS Say settings (or accept defaults):",
+						saySettingsSchema(),
+					)
+					if stop {
+						return result, nil, nil
+					}
+					applySaySettings(&input, content)
 				}
 
 				release, err := acquireTTSLock(ctx)
@@ -424,18 +451,11 @@ Designed to be used with the MCP (Model Context Protocol).`,
 				}
 				defer release()
 
-				log.Debug("Say tool called", "params", input)
-
-				text := input.Text
-				if text == "" {
-					return errorResult("Error: Empty text provided"), nil, nil
-				}
-
 				args := []string{"--rate"}
 				if input.Rate != nil {
 					args = append(args, fmt.Sprintf("%d", *input.Rate))
 				} else {
-					args = append(args, "200")
+					args = append(args, fmt.Sprintf("%d", DefaultSayRate))
 				}
 
 				if input.Voice != nil && *input.Voice != "" {
@@ -847,6 +867,28 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			default:
 			}
 
+			log.Debug("Google TTS tool called", "params", input)
+			text := input.Text
+			if text == "" {
+				return errorResult("Error: Empty text provided"), nil, nil
+			}
+
+			// Gather optional settings before taking the global speech lock so
+			// other sessions are not blocked while the user decides.
+			if input.Voice == nil && input.Model == nil {
+				content, result, stop := maybeElicitContent(
+					ctx,
+					req,
+					"elicit Google TTS settings",
+					"Configure Google TTS settings (or accept defaults):",
+					googleSettingsSchema(),
+				)
+				if stop {
+					return result, nil, nil
+				}
+				applyGoogleSettings(&input, content)
+			}
+
 			release, err := acquireTTSLock(ctx)
 			if err != nil {
 				log.Info("Request cancelled while waiting for TTS lock")
@@ -854,18 +896,12 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			}
 			defer release()
 
-			log.Debug("Google TTS tool called", "params", input)
-			text := input.Text
-			if text == "" {
-				return errorResult("Error: Empty text provided"), nil, nil
-			}
-
-			voice := "Kore"
+			voice := DefaultGoogleVoice
 			if input.Voice != nil && *input.Voice != "" {
 				voice = *input.Voice
 			}
 
-			model := "gemini-2.5-flash-preview-tts"
+			model := DefaultGoogleModel
 			if input.Model != nil && *input.Model != "" {
 				model = *input.Model
 			}
@@ -1005,6 +1041,28 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			default:
 			}
 
+			log.Debug("OpenAI TTS tool called", "params", input)
+			text := input.Text
+			if text == "" {
+				return errorResult("Error: Empty text provided"), nil, nil
+			}
+
+			// Gather optional settings before taking the global speech lock so
+			// other sessions are not blocked while the user decides.
+			if input.Voice == nil && input.Model == nil && input.Speed == nil {
+				content, result, stop := maybeElicitContent(
+					ctx,
+					req,
+					"elicit OpenAI TTS settings",
+					"Configure OpenAI TTS settings (or accept defaults):",
+					openAISettingsSchema(),
+				)
+				if stop {
+					return result, nil, nil
+				}
+				applyOpenAISettings(&input, content)
+			}
+
 			release, err := acquireTTSLock(ctx)
 			if err != nil {
 				log.Info("Request cancelled while waiting for TTS lock")
@@ -1012,23 +1070,17 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			}
 			defer release()
 
-			log.Debug("OpenAI TTS tool called", "params", input)
-			text := input.Text
-			if text == "" {
-				return errorResult("Error: Empty text provided"), nil, nil
-			}
-
-			voice := "alloy"
+			voice := DefaultOpenAIVoice
 			if input.Voice != nil && *input.Voice != "" {
 				voice = *input.Voice
 			}
 
-			model := "gpt-4o-mini-tts-2025-12-15"
+			model := DefaultOpenAIModel
 			if input.Model != nil && *input.Model != "" {
 				model = *input.Model
 			}
 
-			speed := 1.0
+			speed := DefaultOpenAISpeed
 			if input.Speed != nil {
 				if *input.Speed >= 0.25 && *input.Speed <= 4.0 {
 					speed = *input.Speed
@@ -1148,6 +1200,83 @@ Designed to be used with the MCP (Model Context Protocol).`,
 				log.Info("OpenAI TTS audio playback cancelled by user")
 				return textResult("OpenAI TTS audio playback cancelled"), nil, nil
 			}
+		})
+
+		// Add interactive TTS tool that uses elicitation to choose provider
+		ttsTool := &mcp.Tool{
+			Name:  "tts",
+			Title: "Interactive TTS",
+			Description: "Selects a TTS provider and voice settings interactively, " +
+				"then returns a recommendation to call the chosen provider tool.",
+			InputSchema: buildTTSSchema(),
+			Annotations: &mcp.ToolAnnotations{
+				Title:          "Interactive Text-to-Speech",
+				ReadOnlyHint:   false,
+				IdempotentHint: false,
+			},
+		}
+		mcp.AddTool(s, ttsTool, func(
+			ctx context.Context,
+			req *mcp.CallToolRequest,
+			input TTSParams,
+		) (*mcp.CallToolResult, any, error) {
+			text := input.Text
+			if text == "" {
+				return errorResult("Error: Empty text provided"), nil, nil
+			}
+
+			providers := availableProviders()
+			if len(providers) == 0 {
+				return errorResult("Error: No TTS providers configured"), nil, nil
+			}
+
+			if !canElicit(req) {
+				p := providers[0]
+				return textResult(buildProviderRecommendation(
+					p.ID, p.Name, providerRecommendationArgs(p.ID, text, nil),
+				)), nil, nil
+			}
+
+			provider := providers[0]
+			if len(providers) > 1 {
+				selection := elicitForm(ctx, req.Session,
+					"Which TTS provider would you like to use?",
+					providerSelectionSchema(providers),
+				)
+				if result, stop := elicitationStopResult(selection, "elicit TTS provider selection"); stop {
+					return result, nil, nil
+				}
+				var cancelled bool
+				var err error
+				provider, cancelled, err = chooseProvider(providers, selection)
+				if err != nil {
+					return errorResult(fmt.Sprintf("Error: %v", err)), nil, nil
+				}
+				if cancelled {
+					return textResult("Request cancelled"), nil, nil
+				}
+			}
+
+			var settingsContent map[string]any
+			if settingsSchema := settingsSchemaForProvider(provider.ID); settingsSchema != nil {
+				content, result, stop := maybeElicitContent(
+					ctx,
+					req,
+					"elicit TTS voice settings",
+					"Configure voice settings (or accept defaults):",
+					settingsSchema,
+				)
+				if stop {
+					return result, nil, nil
+				}
+				settingsContent = content
+			}
+
+			return textResult(buildProviderRecommendation(
+				provider.ID,
+				provider.Name,
+				providerRecommendationArgs(provider.ID, text, settingsContent),
+			)), nil, nil
 		})
 
 		log.Info("Starting MCP server", "name", "mcp-tts", "version", Version)

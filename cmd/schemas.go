@@ -75,19 +75,12 @@ func buildGoogleTTSSchema() json.RawMessage {
 			"voice": map[string]any{
 				"type":        "string",
 				"description": "Voice name to use (default: 'Kore')",
-				"enum": []string{
-					"Achernar", "Achird", "Algenib", "Algieba", "Alnilam",
-					"Aoede", "Autonoe", "Callirrhoe", "Charon", "Despina",
-					"Enceladus", "Erinome", "Fenrir", "Gacrux", "Iapetus",
-					"Kore", "Laomedeia", "Leda", "Orus", "Puck",
-					"Pulcherrima", "Rasalgethi", "Sadachbia", "Sadaltager", "Schedar",
-					"Sulafat", "Umbriel", "Vindemiatrix", "Zephyr", "Zubenelgenubi",
-				},
+				"enum":        GoogleVoices,
 			},
 			"model": map[string]any{
 				"type":        "string",
 				"description": "TTS model to use (default: 'gemini-2.5-flash-preview-tts')",
-				"enum":        []string{"gemini-2.5-flash-preview-tts", "gemini-2.5-pro-preview-tts", "gemini-2.5-flash-lite-preview-tts"},
+				"enum":        GoogleModels,
 			},
 		},
 		"required": []string{"text"},
@@ -110,12 +103,12 @@ func buildOpenAITTSSchema() json.RawMessage {
 			"voice": map[string]any{
 				"type":        "string",
 				"description": "Voice to use (alloy, ash, ballad, coral, echo, fable, nova, onyx, sage, shimmer, verse; default: 'alloy')",
-				"enum":        []string{"alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer", "verse"},
+				"enum":        OpenAIVoices,
 			},
 			"model": map[string]any{
 				"type":        "string",
 				"description": "TTS model to use (gpt-4o-mini-tts-2025-12-15, tts-1, tts-1-hd; default: 'gpt-4o-mini-tts-2025-12-15')",
-				"enum":        []string{"gpt-4o-mini-tts-2025-12-15", "tts-1", "tts-1-hd"},
+				"enum":        OpenAIModels,
 			},
 			"speed": map[string]any{
 				"type":        "number",

@@ -21,7 +21,7 @@ import (
 // MCPMessage represents a JSON-RPC message for MCP
 type MCPMessage struct {
 	JSONRpc string `json:"jsonrpc"`
-	ID      int    `json:"id"`
+	ID      any    `json:"id,omitempty"`
 	Method  string `json:"method"`
 	Params  any    `json:"params,omitempty"`
 }
@@ -29,9 +29,17 @@ type MCPMessage struct {
 // MCPResponse represents a JSON-RPC response from MCP
 type MCPResponse struct {
 	JSONRpc string `json:"jsonrpc"`
-	ID      int    `json:"id"`
+	ID      any    `json:"id,omitempty"`
 	Result  any    `json:"result,omitempty"`
 	Error   any    `json:"error,omitempty"`
+}
+
+// MCPRequest represents a JSON-RPC request emitted by the server.
+type MCPRequest struct {
+	JSONRpc string `json:"jsonrpc"`
+	ID      any    `json:"id,omitempty"`
+	Method  string `json:"method"`
+	Params  any    `json:"params,omitempty"`
 }
 
 // InitializeParams for MCP initialization
@@ -83,6 +91,7 @@ type MCPTestRunner struct {
 	stdout      io.ReadCloser
 	scanner     *bufio.Scanner
 	responses   chan MCPResponse
+	requests    chan MCPRequest
 	ctx         context.Context
 	cancel      context.CancelFunc
 	initialized bool
@@ -117,6 +126,7 @@ func NewMCPTestRunner(t *testing.T) *MCPTestRunner {
 		stdout:    stdout,
 		scanner:   bufio.NewScanner(stdout),
 		responses: make(chan MCPResponse, 10),
+		requests:  make(chan MCPRequest, 10),
 		ctx:       ctx,
 		cancel:    cancel,
 	}
@@ -129,6 +139,7 @@ func NewMCPTestRunner(t *testing.T) *MCPTestRunner {
 
 func (r *MCPTestRunner) readResponses() {
 	defer close(r.responses)
+	defer close(r.requests)
 
 	for r.scanner.Scan() {
 		line := strings.TrimSpace(r.scanner.Text())
@@ -136,14 +147,50 @@ func (r *MCPTestRunner) readResponses() {
 			continue
 		}
 
-		var response MCPResponse
-		if err := json.Unmarshal([]byte(line), &response); err != nil {
+		var message struct {
+			JSONRpc string `json:"jsonrpc"`
+			ID      any    `json:"id,omitempty"`
+			Method  string `json:"method,omitempty"`
+			Params  any    `json:"params,omitempty"`
+			Result  any    `json:"result,omitempty"`
+			Error   any    `json:"error,omitempty"`
+		}
+		decoder := json.NewDecoder(strings.NewReader(line))
+		decoder.UseNumber()
+		if err := decoder.Decode(&message); err != nil {
 			r.t.Logf("Failed to parse response: %s - Error: %v", line, err)
 			continue
 		}
 
+		if message.Method != "" {
+			if message.ID == nil {
+				continue
+			}
+			select {
+			case r.requests <- MCPRequest{
+				JSONRpc: message.JSONRpc,
+				ID:      message.ID,
+				Method:  message.Method,
+				Params:  message.Params,
+			}:
+			case <-r.ctx.Done():
+				return
+			}
+			continue
+		}
+
+		if message.ID == nil {
+			r.t.Logf("Dropped unexpected JSON-RPC message without id: %s", line)
+			continue
+		}
+
 		select {
-		case r.responses <- response:
+		case r.responses <- MCPResponse{
+			JSONRpc: message.JSONRpc,
+			ID:      message.ID,
+			Result:  message.Result,
+			Error:   message.Error,
+		}:
 		case <-r.ctx.Done():
 			return
 		}
@@ -160,13 +207,66 @@ func (r *MCPTestRunner) sendMessage(msg MCPMessage) error {
 	return err
 }
 
+func (r *MCPTestRunner) sendResult(id any, result any) error {
+	data, err := json.Marshal(MCPResponse{
+		JSONRpc: "2.0",
+		ID:      id,
+		Result:  result,
+	})
+	if err != nil {
+		return err
+	}
+
+	_, err = r.stdin.Write(append(data, '\n'))
+	return err
+}
+
+func messageIDMatches(actual any, expected int) bool {
+	switch value := actual.(type) {
+	case int:
+		return value == expected
+	case int64:
+		return value == int64(expected)
+	case float64:
+		return value == float64(expected)
+	case json.Number:
+		id, err := value.Int64()
+		return err == nil && id == int64(expected)
+	default:
+		return false
+	}
+}
+
+func requireMessageIDInt(t *testing.T, id any) int {
+	t.Helper()
+
+	switch value := id.(type) {
+	case int:
+		return value
+	case int64:
+		return int(value)
+	case float64:
+		return int(value)
+	case json.Number:
+		id, err := value.Int64()
+		require.NoError(t, err)
+		return int(id)
+	default:
+		t.Fatalf("unexpected JSON-RPC id type %T", id)
+		return 0
+	}
+}
+
 func (r *MCPTestRunner) waitForResponse(expectedID int) (MCPResponse, error) {
 	timeout := time.After(10 * time.Second)
 
 	for {
 		select {
-		case response := <-r.responses:
-			if response.ID == expectedID {
+		case response, ok := <-r.responses:
+			if !ok {
+				return MCPResponse{}, fmt.Errorf("response stream closed while waiting for id %d", expectedID)
+			}
+			if messageIDMatches(response.ID, expectedID) {
 				return response, nil
 			}
 			// Put back responses we don't want
@@ -184,22 +284,26 @@ func (r *MCPTestRunner) waitForResponse(expectedID int) (MCPResponse, error) {
 }
 
 func (r *MCPTestRunner) initialize() error {
+	return r.initializeWithParams(1, InitializeParams{
+		ProtocolVersion: "2024-11-05",
+		ClientInfo: map[string]any{
+			"name":    "integration-test",
+			"version": "1.0.0",
+		},
+		Capabilities: map[string]any{},
+	})
+}
+
+func (r *MCPTestRunner) initializeWithParams(id int, params InitializeParams) error {
 	if r.initialized {
 		return nil
 	}
 
 	initMsg := MCPMessage{
 		JSONRpc: "2.0",
-		ID:      1,
+		ID:      id,
 		Method:  "initialize",
-		Params: InitializeParams{
-			ProtocolVersion: "2024-11-05",
-			ClientInfo: map[string]any{
-				"name":    "integration-test",
-				"version": "1.0.0",
-			},
-			Capabilities: map[string]any{},
-		},
+		Params:  params,
 	}
 
 	err := r.sendMessage(initMsg)
@@ -207,7 +311,7 @@ func (r *MCPTestRunner) initialize() error {
 		return err
 	}
 
-	_, err = r.waitForResponse(1)
+	_, err = r.waitForResponse(id)
 	if err != nil {
 		return err
 	}
@@ -261,6 +365,80 @@ func (r *MCPTestRunner) callTool(id int, name string, args any) (MCPResponse, er
 	return r.waitForResponse(id)
 }
 
+type elicitationReply struct {
+	Action   string
+	Content  map[string]any
+	Validate func(*testing.T, MCPRequest)
+}
+
+func (r *MCPTestRunner) callToolWithElicitations(id int, name string, args any, replies []elicitationReply) (MCPResponse, error) {
+	err := r.initialize()
+	if err != nil {
+		return MCPResponse{}, err
+	}
+
+	callMsg := MCPMessage{
+		JSONRpc: "2.0",
+		ID:      id,
+		Method:  "tools/call",
+		Params: ToolCallParams{
+			Name:      name,
+			Arguments: args,
+		},
+	}
+
+	if err := r.sendMessage(callMsg); err != nil {
+		return MCPResponse{}, err
+	}
+
+	timeout := time.After(10 * time.Second)
+	replyIndex := 0
+
+	for {
+		select {
+		case response, ok := <-r.responses:
+			if !ok {
+				return MCPResponse{}, fmt.Errorf("response stream closed while waiting for tool result")
+			}
+			if !messageIDMatches(response.ID, id) {
+				r.t.Logf("Ignoring unexpected response while waiting for tool result: %+v", response)
+				continue
+			}
+			if replyIndex != len(replies) {
+				return MCPResponse{}, fmt.Errorf("tool returned before all elicitation replies were used (%d of %d)", replyIndex, len(replies))
+			}
+			return response, nil
+		case request, ok := <-r.requests:
+			if !ok {
+				return MCPResponse{}, fmt.Errorf("request stream closed while waiting for elicitation")
+			}
+			if request.Method != "elicitation/create" {
+				return MCPResponse{}, fmt.Errorf("unexpected server request %q", request.Method)
+			}
+			if replyIndex >= len(replies) {
+				return MCPResponse{}, fmt.Errorf("received unexpected elicitation request: %+v", request)
+			}
+			reply := replies[replyIndex]
+			replyIndex++
+			if reply.Validate != nil {
+				reply.Validate(r.t, request)
+			}
+
+			result := map[string]any{"action": reply.Action}
+			if reply.Content != nil {
+				result["content"] = reply.Content
+			}
+			if err := r.sendResult(request.ID, result); err != nil {
+				return MCPResponse{}, err
+			}
+		case <-timeout:
+			return MCPResponse{}, fmt.Errorf("timeout waiting for tool result with elicitation")
+		case <-r.ctx.Done():
+			return MCPResponse{}, r.ctx.Err()
+		}
+	}
+}
+
 func (r *MCPTestRunner) Close() {
 	r.cancel()
 	if r.stdin != nil {
@@ -276,6 +454,140 @@ func (r *MCPTestRunner) Close() {
 func stringPtr(s string) *string    { return &s }
 func intPtr(i int) *int             { return &i }
 func float64Ptr(f float64) *float64 { return &f }
+
+func parseJSONLMessages(t *testing.T, path string) []MCPMessage {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err, "Should be able to read JSONL fixture")
+
+	lines := bytes.Split(data, []byte("\n"))
+	messages := make([]MCPMessage, 0, len(lines))
+
+	for _, line := range lines {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+
+		var msg MCPMessage
+		decoder := json.NewDecoder(bytes.NewReader(line))
+		decoder.UseNumber()
+		err := decoder.Decode(&msg)
+		require.NoError(t, err, "Should parse JSONL message")
+		messages = append(messages, msg)
+	}
+
+	return messages
+}
+
+func interactiveTTSToolCallFromFixture(t *testing.T) (int, InitializeParams, int, string, any) {
+	t.Helper()
+
+	messages := parseJSONLMessages(t, "test/json/tts_elicitation.jsonl")
+
+	var initMsg *MCPMessage
+	var toolCallMsg *MCPMessage
+	for i := range messages {
+		switch messages[i].Method {
+		case "initialize":
+			initMsg = &messages[i]
+		case "tools/call":
+			toolCallMsg = &messages[i]
+		}
+	}
+
+	require.NotNil(t, initMsg, "fixture should contain initialize message")
+	require.NotNil(t, toolCallMsg, "fixture should contain tools/call message")
+
+	initParamsBytes, err := json.Marshal(initMsg.Params)
+	require.NoError(t, err)
+
+	var initParams InitializeParams
+	err = json.Unmarshal(initParamsBytes, &initParams)
+	require.NoError(t, err)
+
+	toolParams, ok := toolCallMsg.Params.(map[string]any)
+	require.True(t, ok, "tool call params should be a map")
+
+	name, ok := toolParams["name"].(string)
+	require.True(t, ok, "tool call should specify a tool name")
+	require.Equal(t, "tts", name)
+
+	args, ok := toolParams["arguments"]
+	require.True(t, ok, "tool call should include arguments")
+
+	return requireMessageIDInt(t, initMsg.ID), initParams, requireMessageIDInt(t, toolCallMsg.ID), name, args
+}
+
+func providerSelectionValidator(t *testing.T, request MCPRequest) {
+	t.Helper()
+
+	params, ok := request.Params.(map[string]any)
+	require.True(t, ok, "elicitation params should be a map")
+	assert.Equal(t, "Which TTS provider would you like to use?", params["message"])
+
+	schema, ok := params["requestedSchema"].(map[string]any)
+	require.True(t, ok, "provider selection should include a schema")
+	properties, ok := schema["properties"].(map[string]any)
+	require.True(t, ok)
+	providerField, ok := properties["provider"].(map[string]any)
+	require.True(t, ok)
+	enumValues, ok := providerField["enum"].([]any)
+	require.True(t, ok)
+	assert.Contains(t, enumValues, "Google Gemini")
+	assert.Contains(t, enumValues, "OpenAI")
+}
+
+func openAISettingsValidator(t *testing.T, request MCPRequest) {
+	t.Helper()
+
+	params, ok := request.Params.(map[string]any)
+	require.True(t, ok, "settings elicitation params should be a map")
+	assert.Equal(t, "Configure voice settings (or accept defaults):", params["message"])
+
+	schema, ok := params["requestedSchema"].(map[string]any)
+	require.True(t, ok, "settings elicitation should include a schema")
+	properties, ok := schema["properties"].(map[string]any)
+	require.True(t, ok)
+	assert.Contains(t, properties, "voice")
+	assert.Contains(t, properties, "model")
+	assert.Contains(t, properties, "speed")
+}
+
+func interactiveTTSTextResult(t *testing.T, replies []elicitationReply) string {
+	t.Helper()
+
+	t.Setenv("GOOGLE_AI_API_KEY", "test-google-api-key")
+	t.Setenv("OPENAI_API_KEY", "test-openai-api-key")
+
+	initID, initParams, toolCallID, name, args := interactiveTTSToolCallFromFixture(t)
+
+	runner := NewMCPTestRunner(t)
+	defer runner.Close()
+
+	err := runner.initializeWithParams(initID, initParams)
+	require.NoError(t, err, "initialize should succeed with elicitation capability")
+
+	response, err := runner.callToolWithElicitations(toolCallID, name, args, replies)
+	require.NoError(t, err, "interactive tts call should succeed")
+	assert.Nil(t, response.Error, "interactive tts should not return JSON-RPC error")
+	assert.NotNil(t, response.Result, "interactive tts should return a result")
+
+	result, ok := response.Result.(map[string]any)
+	require.True(t, ok, "result should be a map")
+
+	content, ok := result["content"].([]any)
+	require.True(t, ok, "result should contain content")
+	require.NotEmpty(t, content, "result content should not be empty")
+
+	textContent, ok := content[0].(map[string]any)
+	require.True(t, ok, "text content should be a map")
+
+	text, ok := textContent["text"].(string)
+	require.True(t, ok, "result content should include text")
+	return text
+}
 
 func TestMCPIntegration_Initialize(t *testing.T) {
 	runner := NewMCPTestRunner(t)
@@ -312,7 +624,7 @@ func TestMCPIntegration_ToolsList(t *testing.T) {
 		toolNames = append(toolNames, name)
 	}
 
-	expectedTools := []string{"elevenlabs_tts", "google_tts", "openai_tts"}
+	expectedTools := []string{"elevenlabs_tts", "google_tts", "openai_tts", "tts"}
 
 	// On macOS, we should also have say_tts
 	if os.Getenv("GITHUB_ACTIONS") == "" { // Not in CI
@@ -322,6 +634,64 @@ func TestMCPIntegration_ToolsList(t *testing.T) {
 	for _, expectedTool := range expectedTools {
 		assert.Contains(t, toolNames, expectedTool, "Should contain tool: %s", expectedTool)
 	}
+}
+
+func TestMCPIntegration_TTSInteractiveJSONL(t *testing.T) {
+	text := interactiveTTSTextResult(
+		t,
+		[]elicitationReply{
+			{
+				Action:   "accept",
+				Content:  map[string]any{"provider": "OpenAI"},
+				Validate: providerSelectionValidator,
+			},
+			{
+				Action:   "accept",
+				Content:  map[string]any{},
+				Validate: openAISettingsValidator,
+			},
+		},
+	)
+	assert.Contains(t, text, "User selected OpenAI. Please call openai_tts with arguments:")
+	assert.Contains(t, text, `"text":"Hello from the interactive tts JSONL test."`)
+	assert.Contains(t, text, `"voice":"alloy"`)
+	assert.Contains(t, text, `"model":"gpt-4o-mini-tts-2025-12-15"`)
+	assert.Contains(t, text, `"speed":1`)
+}
+
+func TestMCPIntegration_TTSInteractiveCancellationJSONL(t *testing.T) {
+	t.Run("provider selection cancel returns cancellation text", func(t *testing.T) {
+		text := interactiveTTSTextResult(
+			t,
+			[]elicitationReply{
+				{
+					Action:   "cancel",
+					Validate: providerSelectionValidator,
+				},
+			},
+		)
+
+		assert.Equal(t, "Request cancelled", text)
+	})
+
+	t.Run("settings decline returns cancellation text", func(t *testing.T) {
+		text := interactiveTTSTextResult(
+			t,
+			[]elicitationReply{
+				{
+					Action:   "accept",
+					Content:  map[string]any{"provider": "OpenAI"},
+					Validate: providerSelectionValidator,
+				},
+				{
+					Action:   "decline",
+					Validate: openAISettingsValidator,
+				},
+			},
+		)
+
+		assert.Equal(t, "Request cancelled", text)
+	})
 }
 
 func TestMCPIntegration_SayTTS(t *testing.T) {
@@ -603,7 +973,7 @@ func TestMCPIntegration_JSONCompatibility(t *testing.T) {
 			require.True(t, ok, "Should have arguments")
 
 			// Call the tool
-			response, err := runner.callTool(toolCallMsg.ID, name, args)
+			response, err := runner.callTool(requireMessageIDInt(t, toolCallMsg.ID), name, args)
 			require.NoError(t, err, "Tool call should succeed")
 
 			// Basic validation - the response should have proper structure

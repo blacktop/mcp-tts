@@ -35,7 +35,7 @@ import (
 // Format: tts_{unix_millis}_{8char_hash}.{ext}
 func generateFilename(text, ext string) string {
 	millis := time.Now().UnixMilli()
-	hash := sha256.Sum256([]byte(fmt.Sprintf("%d_%s", millis, text)))
+	hash := sha256.Sum256(fmt.Appendf(nil, "%d_%s", millis, text))
 	hashStr := fmt.Sprintf("%x", hash[:4]) // 8 hex chars
 	return fmt.Sprintf("tts_%d_%s.%s", millis, hashStr, ext)
 }

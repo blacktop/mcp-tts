@@ -19,6 +19,7 @@
 - **`openai_tts.json`** - Basic OpenAI TTS test
 - **`openai_tts_instructions.json`** - OpenAI TTS with custom voice instructions
 - **`openai_tts_comprehensive.json`** - Full OpenAI TTS feature test
+- **`tts_elicitation.jsonl`** - Interactive `tts` request fixture consumed by the Go integration harness; the harness supplies the `elicitation/create` replies, so this is not a standalone stdin transcript
 
 ### **🔍 Other Files**
 - **`main.go`** - Go-based test runner
@@ -105,4 +106,4 @@ Removed in this cleanup:
 - ✅ Core functionality tests for all TTS engines
 - ✅ MCP protocol validation tests
 
-This focused test suite covers all essential functionality including security testing without redundancy. 
+This focused test suite covers all essential functionality including security testing without redundancy.

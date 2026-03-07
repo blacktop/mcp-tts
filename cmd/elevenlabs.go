@@ -14,5 +14,5 @@ type ElevenLabsParams struct {
 	LanguageCode  string           `json:"language_code,omitempty"`
 	PreviousText  string           `json:"previous_text,omitempty"`
 	NextText      string           `json:"next_text,omitempty"`
-	VoiceSettings SynthesisOptions `json:"voice_settings,omitempty"`
+	VoiceSettings SynthesisOptions `json:"voice_settings"`
 }
