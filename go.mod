@@ -5,7 +5,7 @@ go 1.25
 require (
 	github.com/caarlos0/ctrlc v1.2.0
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/charmbracelet/log v0.4.2
+	github.com/charmbracelet/log v1.0.0
 	github.com/gopxl/beep/v2 v2.1.1
 	github.com/modelcontextprotocol/go-sdk v1.4.0
 	github.com/openai/openai-go v1.12.0
