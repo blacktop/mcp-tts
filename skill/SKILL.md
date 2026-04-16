@@ -95,7 +95,7 @@ Convert verbose output to conversational speech:
 mcp__mcp-tts__google_tts
 - text: string (required)
 - voice: string (default: "Kore")
-- model: string (default: "gemini-2.5-flash-preview-tts")
+- model: string (default: "gemini-3.1-flash-tts-preview")
 ```
 
 Voices: Achernar, Achird, Algenib, Algieba, Alnilam, Aoede, Autonoe, Callirrhoe, Charon, Despina, Enceladus, Erinome, Fenrir, Gacrux, Iapetus, Kore, Laomedeia, Leda, Orus, Puck, Pulcherrima, Rasalgethi, Sadachbia, Sadaltager, Schedar, Sulafat, Umbriel, Vindemiatrix, Zephyr, Zubenelgenubi

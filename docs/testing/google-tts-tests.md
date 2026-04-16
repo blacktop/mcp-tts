@@ -19,7 +19,7 @@ Contains all test functions for the Google TTS functionality:
 
 **`TestGoogleTTSParameterValidation`** - Validates all supported parameters:
 - Voice options: 30 Google TTS voices (Zephyr, Puck, Charon, Kore, Fenrir, Aoede, Leda, Orus, Autonoe, Enceladus, etc.)
-- Model options: gemini-2.5-flash-preview-tts, gemini-2.5-pro-preview-tts
+- Model options: gemini-3.1-flash-tts-preview, gemini-2.5-flash-preview-tts, gemini-2.5-pro-preview-tts, gemini-2.5-flash-lite-preview-tts
 - Default value handling
 
 #### Audio Tests

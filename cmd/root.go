@@ -248,7 +248,7 @@ type ElevenLabsTTSParams struct {
 type GoogleTTSParams struct {
 	Text  string  `json:"text" mcp:"The text to convert to speech using Google TTS"`
 	Voice *string `json:"voice,omitempty" mcp:"Voice name to use (e.g. 'Kore', 'Puck', 'Fenrir', etc. - see documentation for full list of 30 voices, default: 'Kore')"`
-	Model *string `json:"model,omitempty" mcp:"TTS model to use (gemini-2.5-flash-preview-tts, gemini-2.5-pro-preview-tts, gemini-2.5-flash-lite-preview-tts; default: 'gemini-2.5-flash-preview-tts')"`
+	Model *string `json:"model,omitempty" mcp:"TTS model to use (gemini-3.1-flash-tts-preview, gemini-2.5-flash-preview-tts, gemini-2.5-pro-preview-tts, gemini-2.5-flash-lite-preview-tts; default: 'gemini-3.1-flash-tts-preview')"`
 }
 
 type OpenAITTSParams struct {

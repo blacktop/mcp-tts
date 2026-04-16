@@ -265,7 +265,7 @@ Or manually add to `~/.gemini/settings.json` (or `.gemini/settings.json` in proj
 
 2025/05/23 18:26:45 INFO Starting MCP server name="Say TTS Service" version=""
 2025/05/23 18:26:45 DEBU Google TTS tool called request="{...}"
-2025/05/23 18:26:45 DEBU Generating TTS audio model=gemini-2.5-flash-preview-tts voice=Kore text="Hello! This is a test of Google's TTS API. How does it sound?"
+2025/05/23 18:26:45 DEBU Generating TTS audio model=gemini-3.1-flash-tts-preview voice=Kore text="Hello! This is a test of Google's TTS API. How does it sound?"
 2025/05/23 18:26:49 INFO Playing TTS audio via beep speaker bytes=181006
 2025/05/23 18:26:53 INFO Speaking via Google TTS text="Hello! This is a test of Google's TTS API. How does it sound?" voice=Kore
 ```

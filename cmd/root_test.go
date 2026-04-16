@@ -185,7 +185,7 @@ func TestGoogleTTSTool(t *testing.T) {
 				Text: "Hello, this is a test of Google TTS",
 			},
 			expectError:   false,
-			shouldContain: []string{"Google TTS", "gemini-2.5-flash-preview-tts", "voice Kore"},
+			shouldContain: []string{"Google TTS", DefaultGoogleModel, "voice Kore"},
 		},
 		{
 			name: "successful TTS request with custom voice and model",
@@ -558,7 +558,7 @@ func callGoogleTTSHandler(ctx context.Context, params *TestCallToolParams[Google
 		voice = *params.Arguments.Voice
 	}
 
-	model := "gemini-2.5-flash-preview-tts"
+	model := DefaultGoogleModel
 	if params.Arguments.Model != nil && *params.Arguments.Model != "" {
 		model = *params.Arguments.Model
 	}
