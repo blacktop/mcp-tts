@@ -1,7 +1,8 @@
 .PHONY: bump
 bump:
 	@echo "🚀 Bumping Version"
-	git tag $(shell svu patch)
+	$(eval NEXT := $(shell svu patch))
+	git tag $(NEXT) -m "$(NEXT)"
 	git push --tags
 
 .PHONY: build
