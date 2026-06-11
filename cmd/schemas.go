@@ -65,6 +65,24 @@ func buildElevenLabsTTSSchema() json.RawMessage {
 	return data
 }
 
+func buildSixtyDBTTSSchema() json.RawMessage {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"text": map[string]any{
+				"type":        "string",
+				"description": "The text to convert to speech using the 60dB API",
+			},
+		},
+		"required": []string{"text"},
+	}
+	data, err := json.Marshal(schema)
+	if err != nil {
+		panic(fmt.Sprintf("failed to marshal sixtydb_tts schema: %v", err))
+	}
+	return data
+}
+
 func buildGoogleTTSSchema() json.RawMessage {
 	schema := map[string]any{
 		"type": "object",

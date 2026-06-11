@@ -24,6 +24,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -362,6 +363,10 @@ type ElevenLabsTTSParams struct {
 	Text string `json:"text" mcp:"The text to convert to speech using ElevenLabs API"`
 }
 
+type SixtyDBTTSParams struct {
+	Text string `json:"text" mcp:"The text to convert to speech using the 60dB API"`
+}
+
 type GoogleTTSParams struct {
 	Text  string  `json:"text" mcp:"The text to convert to speech using Google TTS"`
 	Voice *string `json:"voice,omitempty,omitzero" mcp:"Voice name to use (e.g. 'Kore', 'Puck', 'Fenrir', etc. - see documentation for full list of 30 voices, default: 'Kore')"`
@@ -440,6 +445,7 @@ Provides multiple text-to-speech services via MCP protocol:
 • elevenlabs_tts - Uses ElevenLabs API for high-quality speech synthesis
 • google_tts - Uses Google's Gemini TTS models for natural speech
 • openai_tts - Uses OpenAI's TTS API with various voice options
+• sixtydb_tts - Uses the 60dB API for high-quality speech synthesis
 
 Each tool supports different voices, rates, and configuration options.
 Requires appropriate API keys for cloud-based services.
@@ -518,6 +524,12 @@ Designed to be used with the MCP (Model Context Protocol).`,
 		// ElevenLabs icon (stylized "XI" or wave pattern)
 		elevenLabsIcon := mcp.Icon{
 			Source:   "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0Ij48cGF0aCBmaWxsPSJjdXJyZW50Q29sb3IiIGQ9Ik03IDRoMnYxNkg3em04IDBoMnYxNmgtMnoiLz48L3N2Zz4=",
+			MIMEType: "image/svg+xml",
+			Sizes:    []string{"24x24"},
+		}
+		// 60dB icon (audio waveform bars)
+		sixtyDBIcon := mcp.Icon{
+			Source:   "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiPjxwYXRoIGQ9Ik00IDEwdjRNOCA2djEyTTEyIDl2Nk0xNiA0djE2TTIwIDh2OCIvPjwvc3ZnPg==",
 			MIMEType: "image/svg+xml",
 			Sizes:    []string{"24x24"},
 		}
@@ -768,6 +780,133 @@ Designed to be used with the MCP (Model Context Protocol).`,
 
 			return deliverAudio(text, audioData, saveMP3, func() error {
 				return playMP3("elevenlabs_tts", audioData)
+			})
+		})
+
+		// Add the "sixtydb_tts" tool
+		sixtyDBTool := &mcp.Tool{
+			Name:        "sixtydb_tts",
+			Title:       "60dB",
+			Description: "Uses the 60dB API to generate speech from text",
+			InputSchema: buildSixtyDBTTSSchema(),
+			Icons:       []mcp.Icon{sixtyDBIcon},
+			Annotations: &mcp.ToolAnnotations{
+				Title:          "60dB Text-to-Speech",
+				ReadOnlyHint:   false,
+				IdempotentHint: true,
+			},
+		}
+
+		mcp.AddTool(s, sixtyDBTool, func(ctx context.Context, _ *mcp.CallToolRequest, input SixtyDBTTSParams) (*mcp.CallToolResult, any, error) {
+			select {
+			case <-ctx.Done():
+				return textResult("Request cancelled"), nil, nil
+			default:
+			}
+
+			log.Debug("60dB tool called", "params", input)
+			text := input.Text
+			if text == "" {
+				return errorResult("Error: text must be a string"), nil, nil
+			}
+
+			apiKey := os.Getenv("SIXTYDB_API_KEY")
+			if apiKey == "" {
+				log.Error("SIXTYDB_API_KEY not set")
+				return errorResult("Error: SIXTYDB_API_KEY is not set"), nil, nil
+			}
+
+			// voice_id is optional: when unset, 60dB uses the account's default
+			// voice. The model is selected via the voice, so there is no model_id.
+			voiceID := os.Getenv("SIXTYDB_VOICE_ID")
+			if voiceID == "" {
+				log.Debug("Voice not specified, using 60dB account default")
+			}
+
+			// Fetch the audio synchronously so HTTP/API errors surface to the
+			// caller, then hand playback off to the background.
+			const url = "https://api.60db.ai/tts-synthesize"
+			params := SixtyDBParams{
+				Text:         text,
+				VoiceID:      voiceID,
+				Speed:        DefaultSixtyDBSpeed,      // 0.5-2.0
+				Stability:    DefaultSixtyDBStability,  // 0-100; lower = more expressive
+				Similarity:   DefaultSixtyDBSimilarity, // 0-100; voice matching level
+				Enhance:      true,
+				OutputFormat: DefaultSixtyDBOutputFormat, // mp3, routed through playMP3/saveMP3
+			}
+
+			b, err := json.Marshal(params)
+			if err != nil {
+				log.Error("Failed to marshal request body", "error", err)
+				return errorResult(fmt.Sprintf("Error: failed to marshal request body: %v", err)), nil, nil
+			}
+
+			log.Debug("Making 60dB API request", "url", url, "voice", voiceID, "text", text)
+			httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(b))
+			if err != nil {
+				log.Error("Failed to create request", "error", err)
+				return errorResult(fmt.Sprintf("Error: failed to create request: %v", err)), nil, nil
+			}
+			httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+			httpReq.Header.Set("Content-Type", "application/json")
+			httpReq.Header.Set("accept", "application/json")
+
+			safeLog("Sending HTTP request", httpReq)
+			res, err := http.DefaultClient.Do(httpReq)
+			if err != nil {
+				if ctx.Err() != nil {
+					return textResult("Request cancelled"), nil, nil
+				}
+				log.Error("Failed to send request", "error", err)
+				return errorResult(fmt.Sprintf("Error: failed to send request: %v", err)), nil, nil
+			}
+			defer res.Body.Close()
+
+			body, err := io.ReadAll(res.Body)
+			if err != nil {
+				if ctx.Err() != nil {
+					return textResult("Request cancelled"), nil, nil
+				}
+				log.Error("Failed to read 60dB response", "error", err)
+				return errorResult(fmt.Sprintf("Error: failed to read response: %v", err)), nil, nil
+			}
+
+			if res.StatusCode != http.StatusOK {
+				log.Error("60dB request failed", "status", res.Status, "body", string(body))
+				if len(body) > 0 {
+					return errorResult(fmt.Sprintf("Error: 60dB API error (status %d): %s", res.StatusCode, string(body))), nil, nil
+				}
+				return errorResult(fmt.Sprintf("Error: 60dB API error: status %d %s", res.StatusCode, res.Status)), nil, nil
+			}
+
+			var parsed SixtyDBResponse
+			if err := json.Unmarshal(body, &parsed); err != nil {
+				log.Error("Failed to decode 60dB response", "error", err)
+				return errorResult(fmt.Sprintf("Error: failed to decode 60dB response: %v", err)), nil, nil
+			}
+			if !parsed.Success {
+				msg := parsed.Message
+				if msg == "" {
+					msg = "request was not successful"
+				}
+				log.Error("60dB synthesis failed", "message", msg)
+				return errorResult(fmt.Sprintf("Error: 60dB API error: %s", msg)), nil, nil
+			}
+			if parsed.AudioBase64 == "" {
+				log.Error("60dB response contained no audio")
+				return errorResult("Error: 60dB API returned no audio"), nil, nil
+			}
+
+			audioData, err := base64.StdEncoding.DecodeString(parsed.AudioBase64)
+			if err != nil {
+				log.Error("Failed to decode 60dB audio", "error", err)
+				return errorResult(fmt.Sprintf("Error: failed to decode 60dB audio: %v", err)), nil, nil
+			}
+			log.Debug("60dB audio received", "bytes", len(audioData))
+
+			return deliverAudio(text, audioData, saveMP3, func() error {
+				return playMP3("sixtydb_tts", audioData)
 			})
 		})
 
@@ -1119,6 +1258,9 @@ func safeLog(message string, req *http.Request) {
 	reqCopy := req.Clone(context.Background())
 	if _, exists := reqCopy.Header["Xi-Api-Key"]; exists {
 		reqCopy.Header["Xi-Api-Key"] = []string{"******"} // Mask password
+	}
+	if _, exists := reqCopy.Header["Authorization"]; exists {
+		reqCopy.Header["Authorization"] = []string{"******"} // Mask bearer token
 	}
 	log.With(reqCopy).Debug(message)
 }

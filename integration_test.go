@@ -67,6 +67,11 @@ type ElevenLabsArgs struct {
 	Text string `json:"text"`
 }
 
+// SixtyDBArgs for sixtydb_tts tool
+type SixtyDBArgs struct {
+	Text string `json:"text"`
+}
+
 // GoogleTTSArgs for google_tts tool
 type GoogleTTSArgs struct {
 	Text  string  `json:"text"`
@@ -641,7 +646,7 @@ func TestMCPIntegration_ToolsList(t *testing.T) {
 		toolNames = append(toolNames, name)
 	}
 
-	expectedTools := []string{"elevenlabs_tts", "google_tts", "openai_tts", "tts"}
+	expectedTools := []string{"elevenlabs_tts", "google_tts", "openai_tts", "sixtydb_tts", "tts"}
 
 	// On macOS, we should also have say_tts
 	if os.Getenv("GITHUB_ACTIONS") == "" { // Not in CI
@@ -774,6 +779,46 @@ func TestMCPIntegration_ElevenLabsTTS(t *testing.T) {
 	}
 
 	assert.NotNil(t, response.Result, "elevenlabs_tts should return result")
+
+	// Verify the result structure
+	result, ok := response.Result.(map[string]any)
+	require.True(t, ok, "Result should be a map")
+
+	content, ok := result["content"].([]any)
+	require.True(t, ok, "Result should contain content array")
+	require.Len(t, content, 1, "Should have one content item")
+
+	textContent, ok := content[0].(map[string]any)
+	require.True(t, ok, "Content should be a map")
+
+	text, ok := textContent["text"].(string)
+	require.True(t, ok, "Content should have text")
+
+	requireSpeakingOrSkip(t, text)
+}
+
+func TestMCPIntegration_SixtyDBTTS(t *testing.T) {
+	if os.Getenv("SIXTYDB_API_KEY") == "" {
+		t.Skip("Skipping 60dB test: SIXTYDB_API_KEY not set")
+	}
+
+	runner := NewMCPTestRunner(t)
+	defer runner.Close()
+
+	args := SixtyDBArgs{
+		Text: "Hello, world! This is a test of 60dB TTS integration.",
+	}
+
+	response, err := runner.callTool(4, "sixtydb_tts", args)
+	require.NoError(t, err, "sixtydb_tts call should succeed")
+
+	if response.Error != nil {
+		t.Logf("sixtydb_tts error: %v", response.Error)
+		// Don't fail if API key is invalid or API is unavailable
+		return
+	}
+
+	assert.NotNil(t, response.Result, "sixtydb_tts should return result")
 
 	// Verify the result structure
 	result, ok := response.Result.(map[string]any)
