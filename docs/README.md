@@ -19,7 +19,7 @@
 ## 🏗️ **Architecture**
 
 ### **Core Components**
-- **`cmd/root.go`** - Main MCP server with 4 TTS tools (say, ElevenLabs, Google, OpenAI)
+- **`cmd/root.go`** - Main MCP server with 5 TTS tools (say, ElevenLabs, Google, OpenAI, 60dB)
 - **`cmd/cancellation_manager.go`** - Request tracking and cancellation system
 - **`cmd/cancellable_wrapper.go`** - Tool wrapper providing cancellation support
 - **`cmd/notification_handler.go`** - MCP cancellation notification processing
@@ -29,6 +29,7 @@
 2. **`elevenlabs_tts`** - ElevenLabs API integration
 3. **`google_tts`** - Google Gemini TTS models
 4. **`openai_tts`** - OpenAI TTS API integration
+5. **`sixtydb_tts`** - 60dB API integration
 
 ### **Security Features**
 - ✅ Request ID sanitization and validation
@@ -45,11 +46,13 @@
 export OPENAI_API_KEY="your-openai-key"
 export ELEVENLABS_API_KEY="your-elevenlabs-key"  
 export GOOGLE_AI_API_KEY="your-google-key"
+export SIXTYDB_API_KEY="your-60db-key"
 
 # Optional configuration
 export OPENAI_TTS_INSTRUCTIONS="Custom voice instructions"
 export ELEVENLABS_VOICE_ID="custom-voice-id"
 export ELEVENLABS_MODEL_ID="custom-model-id"
+export SIXTYDB_VOICE_ID="custom-voice-id"
 ```
 
 ### **MCP Tools**
@@ -99,6 +102,16 @@ All tools support cancellation via MCP `notifications/cancelled` protocol.
     "model": "gpt-4o-mini-tts",
     "speed": 1.0,
     "instructions": "Speak clearly and professionally"
+  }
+}
+```
+
+#### **sixtydb_tts**
+```json
+{
+  "name": "sixtydb_tts",
+  "arguments": {
+    "text": "Text to speak"
   }
 }
 ```

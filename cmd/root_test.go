@@ -606,6 +606,83 @@ func TestElevenLabsTTSTool(t *testing.T) {
 	}
 }
 
+func TestSixtyDBTTSTool(t *testing.T) {
+	// Set up test environment variables
+	originalAPIKey := os.Getenv("SIXTYDB_API_KEY")
+	defer func() {
+		if originalAPIKey != "" {
+			os.Setenv("SIXTYDB_API_KEY", originalAPIKey)
+		} else {
+			os.Unsetenv("SIXTYDB_API_KEY")
+		}
+	}()
+
+	tests := []struct {
+		name          string
+		setupEnv      func()
+		params        SixtyDBTTSParams
+		expectError   bool
+		shouldContain []string
+	}{
+		{
+			name: "missing API key",
+			setupEnv: func() {
+				os.Unsetenv("SIXTYDB_API_KEY")
+			},
+			params: SixtyDBTTSParams{
+				Text: "Hello",
+			},
+			expectError:   true,
+			shouldContain: []string{"SIXTYDB_API_KEY is not set"},
+		},
+		{
+			name: "empty text",
+			setupEnv: func() {
+				os.Setenv("SIXTYDB_API_KEY", "test-api-key")
+			},
+			params: SixtyDBTTSParams{
+				Text: "",
+			},
+			expectError:   true,
+			shouldContain: []string{"text must be a string"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup environment
+			tt.setupEnv()
+
+			ctx := context.Background()
+			params := &TestCallToolParams[SixtyDBTTSParams]{
+				Name:      "sixtydb_tts",
+				Arguments: tt.params,
+			}
+
+			// Call the handler directly
+			result, err := callSixtyDBTTSHandler(ctx, params)
+
+			if tt.expectError {
+				require.NotNil(t, result)
+				assert.True(t, result.IsError, "Expected error but got success")
+			} else {
+				require.NoError(t, err)
+				require.NotNil(t, result)
+				assert.False(t, result.IsError, "Expected success but got error: %v", result)
+			}
+
+			// Check that result contains expected strings
+			if len(tt.shouldContain) > 0 {
+				resultText := extractTextFromResult(result)
+				for _, expectedStr := range tt.shouldContain {
+					assert.Contains(t, resultText, expectedStr,
+						"Result should contain '%s', but got: %s", expectedStr, resultText)
+				}
+			}
+		})
+	}
+}
+
 func TestParameterValidation(t *testing.T) {
 	t.Run("SayTTSParams", func(t *testing.T) {
 		tests := []struct {
@@ -752,6 +829,31 @@ func callElevenLabsTTSHandler(ctx context.Context, params *TestCallToolParams[El
 	if apiKey == "" {
 		return &TestCallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: "Error: ELEVENLABS_API_KEY is not set"}},
+			IsError: true,
+		}, nil
+	}
+
+	// Mock successful execution
+	responseText := fmt.Sprintf("Speaking: %s", params.Arguments.Text)
+	return &TestCallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: responseText}},
+	}, nil
+}
+
+func callSixtyDBTTSHandler(ctx context.Context, params *TestCallToolParams[SixtyDBTTSParams]) (*TestCallToolResult, error) {
+	// Mock implementation that simulates the 60dB handler logic
+	if params.Arguments.Text == "" {
+		return &TestCallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: "Error: text must be a string"}},
+			IsError: true,
+		}, nil
+	}
+
+	// Check API key
+	apiKey := os.Getenv("SIXTYDB_API_KEY")
+	if apiKey == "" {
+		return &TestCallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: "Error: SIXTYDB_API_KEY is not set"}},
 			IsError: true,
 		}, nil
 	}
@@ -949,6 +1051,41 @@ func TestCancellation(t *testing.T) {
 		cancel()
 
 		result, err := callCancellableElevenLabsTTSHandler(ctx, params)
+
+		// Should handle cancellation gracefully
+		require.NoError(t, err)
+		require.NotNil(t, result)
+
+		resultText := extractTextFromResult(result)
+		assert.Contains(t, resultText, "cancelled", "Should indicate cancellation")
+	})
+
+	t.Run("60dB TTS cancellation", func(t *testing.T) {
+		// Set up test environment
+		originalAPIKey := os.Getenv("SIXTYDB_API_KEY")
+		os.Setenv("SIXTYDB_API_KEY", "test-api-key")
+		defer func() {
+			if originalAPIKey != "" {
+				os.Setenv("SIXTYDB_API_KEY", originalAPIKey)
+			} else {
+				os.Unsetenv("SIXTYDB_API_KEY")
+			}
+		}()
+
+		// Create a context that we can cancel
+		ctx, cancel := context.WithCancel(context.Background())
+
+		params := &TestCallToolParams[SixtyDBTTSParams]{
+			Name: "sixtydb_tts",
+			Arguments: SixtyDBTTSParams{
+				Text: "This should be cancelled",
+			},
+		}
+
+		// Cancel immediately to test early cancellation detection
+		cancel()
+
+		result, err := callCancellableSixtyDBTTSHandler(ctx, params)
 
 		// Should handle cancellation gracefully
 		require.NoError(t, err)
@@ -1155,6 +1292,52 @@ func callCancellableElevenLabsTTSHandler(ctx context.Context, params *TestCallTo
 	if apiKey == "" {
 		return &TestCallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: "Error: ELEVENLABS_API_KEY is not set"}},
+			IsError: true,
+		}, nil
+	}
+
+	// Simulate processing with cancellation checks
+	for range 3 {
+		select {
+		case <-ctx.Done():
+			return &TestCallToolResult{
+				Content: []mcp.Content{&mcp.TextContent{Text: "Audio playback cancelled"}},
+			}, nil
+		case <-time.After(10 * time.Millisecond):
+			// Continue processing
+		}
+	}
+
+	// Mock successful execution
+	responseText := fmt.Sprintf("Speaking: %s", params.Arguments.Text)
+	return &TestCallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: responseText}},
+	}, nil
+}
+
+func callCancellableSixtyDBTTSHandler(ctx context.Context, params *TestCallToolParams[SixtyDBTTSParams]) (*TestCallToolResult, error) {
+	// Check for early cancellation
+	select {
+	case <-ctx.Done():
+		return &TestCallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: "Request cancelled"}},
+		}, nil
+	default:
+	}
+
+	// Basic validation
+	if params.Arguments.Text == "" {
+		return &TestCallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: "Error: text must be a string"}},
+			IsError: true,
+		}, nil
+	}
+
+	// Check API key
+	apiKey := os.Getenv("SIXTYDB_API_KEY")
+	if apiKey == "" {
+		return &TestCallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: "Error: SIXTYDB_API_KEY is not set"}},
 			IsError: true,
 		}, nil
 	}

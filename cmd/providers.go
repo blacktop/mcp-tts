@@ -32,6 +32,7 @@ const (
 	ProviderElevenLabs = "elevenlabs_tts"
 	ProviderGoogle     = "google_tts"
 	ProviderOpenAI     = "openai_tts"
+	ProviderSixtyDB    = "sixtydb_tts"
 )
 
 // Default values for provider-specific settings.
@@ -47,6 +48,15 @@ const (
 	// default must be a premade voice.
 	DefaultElevenLabsVoiceID = "EXAVITQu4vr4xnSDxMaL"
 	DefaultElevenLabsModel   = "eleven_v3"
+	// 60dB defaults. There is no public premade voice ID: when
+	// SIXTYDB_VOICE_ID is unset the voice_id field is omitted and 60dB uses the
+	// account's system default voice. Stability/similarity are on a 0-100 scale.
+	DefaultSixtyDBSpeed      = 1.0
+	DefaultSixtyDBStability  = 50
+	DefaultSixtyDBSimilarity = 75
+	// DefaultSixtyDBOutputFormat is mp3 so the response routes through the
+	// shared playMP3/saveMP3 path, matching ElevenLabs.
+	DefaultSixtyDBOutputFormat = "mp3"
 )
 
 // Voice and model lists shared by tool schemas (schemas.go) and
@@ -94,6 +104,9 @@ func availableProviders() []providerOption {
 	}
 	if os.Getenv("OPENAI_API_KEY") != "" {
 		providers = append(providers, providerOption{ProviderOpenAI, "OpenAI"})
+	}
+	if os.Getenv("SIXTYDB_API_KEY") != "" {
+		providers = append(providers, providerOption{ProviderSixtyDB, "60dB"})
 	}
 	return providers
 }

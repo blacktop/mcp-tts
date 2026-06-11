@@ -18,11 +18,12 @@
 
 Adds Text-to-Speech to things like Claude Desktop and Cursor IDE.  
 
-It registers four TTS tools: 
+It registers five TTS tools: 
  - `say_tts` 
  - `elevenlabs_tts`
  - `google_tts`
  - `openai_tts`
+ - `sixtydb_tts`
 
 ### `say_tts`
 
@@ -62,6 +63,16 @@ Supports three quality models:
 Additional features:
 - Speed control from 0.25x to 4.0x (default: 1.0x)
 - Custom voice instructions (e.g., "Speak in a cheerful and positive tone") via parameter or `OPENAI_TTS_INSTRUCTIONS` environment variable
+
+### `sixtydb_tts`
+
+Uses the [60dB](https://60db.ai) text-to-speech API to speak the text with high-quality AI voices. Returns MP3 audio.
+
+Configuration via environment variables:
+- `SIXTYDB_API_KEY` (required)
+- `SIXTYDB_VOICE_ID` (optional) — when unset, 60dB uses the account's default voice. List your voices via the [`/myvoices`](https://docs.60db.ai/api-reference/voices/get-my-voices) endpoint.
+
+The request uses sensible defaults (speed `1.0`, stability `50`, similarity `75`, enhancement on) on 60dB's 0–100 settings scale.
 
 ## Configuration
 
@@ -125,6 +136,7 @@ Files are saved with unique names: `tts_{timestamp}_{hash}.{ext}`
 | ElevenLabs | MP3 |
 | Google TTS | WAV |
 | OpenAI TTS | MP3 |
+| 60dB | MP3 |
 
 ## Getting Started
 
@@ -145,6 +157,7 @@ Provides multiple text-to-speech services via MCP protocol:
 • elevenlabs_tts - Uses ElevenLabs API for high-quality speech synthesis
 • google_tts - Uses Google's Gemini TTS models for natural speech
 • openai_tts - Uses OpenAI's TTS API with various voice options
+• sixtydb_tts - Uses the 60dB API for high-quality speech synthesis
 
 Each tool supports different voices, rates, and configuration options.
 Requires appropriate API keys for cloud-based services.
@@ -180,6 +193,8 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
         "GOOGLE_AI_API_KEY": "********",
         "OPENAI_API_KEY": "********",
         "OPENAI_TTS_INSTRUCTIONS": "Speak in a cheerful and positive tone",
+        "SIXTYDB_API_KEY": "********",
+        "SIXTYDB_VOICE_ID": "",
         "MCP_TTS_SUPPRESS_SPEAKING_OUTPUT": "true",
         "MCP_TTS_ALLOW_CONCURRENT": "false"
       }
@@ -239,6 +254,8 @@ Or manually add to `~/.gemini/settings.json` (or `.gemini/settings.json` in proj
 - `GOOGLE_AI_API_KEY` or `GEMINI_API_KEY`: Your Google AI API key (required for `google_tts`)
 - `OPENAI_API_KEY`: Your OpenAI API key (required for `openai_tts`)
 - `OPENAI_TTS_INSTRUCTIONS`: Custom voice instructions for OpenAI TTS (optional, e.g., "Speak in a cheerful and positive tone")
+- `SIXTYDB_API_KEY`: Your 60dB API key (required for `sixtydb_tts`)
+- `SIXTYDB_VOICE_ID`: 60dB voice ID (optional; when unset, 60dB uses the account's default voice — list your voices via the `/myvoices` endpoint)
 - `MCP_TTS_SUPPRESS_SPEAKING_OUTPUT`: Set to "true" to suppress "Speaking:" output (optional)
 - `MCP_TTS_ALLOW_CONCURRENT`: Set to "true" to allow concurrent TTS operations (optional, defaults to sequential)
 - `MCP_TTS_OUTPUT_DIR`: Directory to save audio files (optional)
