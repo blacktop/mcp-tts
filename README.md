@@ -1,3 +1,5 @@
+[![MCP Toplist](https://mcptoplist.com/badge/mcp.so%2Fmcp-tts%2Fblacktop.svg)](https://mcptoplist.com/server/mcp.so%2Fmcp-tts%2Fblacktop)
+
 <p align="center">
   <a href="https://github.com/blacktop/mcp-tts"><img alt="mcp-tts Logo" src="https://raw.githubusercontent.com/blacktop/mcp-tts/main/docs/logo.webp" height="200" /></a>
   <h1 align="center">mcp-tts</h1>
