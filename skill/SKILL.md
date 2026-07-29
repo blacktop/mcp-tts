@@ -1,193 +1,146 @@
 ---
 name: speak
-description: Announces plans, issues, and summaries out loud using TTS. Use this skill PROACTIVELY after completing major tasks like finalizing a plan, resolving an issue, or generating a summary. Defaults to the local macOS `say` System Voice through `say_tts` (zero config, no explicit voice required); optional per-project voices from installed `say` voices or cloud providers (google, openai, elevenlabs) can distinguish projects and message types.
+description: "Provides concise spoken alerts and digests through the mcp-tts MCP server. It should be selected proactively for significant AI and DevOps transitions: a substantial plan is ready, a long build/test/deploy/release/monitoring phase changes state, a major task completes, a terminal blocker or exhausted retry budget needs attention, user approval/authentication/manual action is required, or a lengthy final result needs a short audible summary. Do not use for routine progress or ordinary short replies."
 ---
 
 # Speak
 
-Announce plans, issues, and summaries aloud. Triggered automatically after major milestones.
+Use speech as an attention channel for meaningful agent transitions. Keep the complete result, evidence, and required interaction in text; audio only alerts the user or gives a short digest.
 
-The default path is **local and zero-key**: call `say_tts` (macOS, no API key) with `voice` unset so `/usr/bin/say` uses the host's configured System Voice. A plain terminal `say "text"` works this way too, and the MCP tool must preserve that behavior. Cloud voices and explicit installed `say` voices are optional enhancements when a saved config or the user selects them.
+## Non-negotiable rules
 
-## When to Announce
+- Preserve task truth. Never announce success while checks failed, were skipped, remain pending, or could not run.
+- Never let a TTS failure change whether the main task continues, stops, succeeds, or fails.
+- Never speak secrets, tokens, credentials, private keys, environment values, proprietary source, raw logs, stack traces, personal data, or full sensitive identifiers.
+- Respect quiet requests. Stay silent in CI, headless sessions, non-interactive automation, or when no audio tool is available.
+- Deduplicate announcements. Speak once per meaningful transition, blocker, or request for help.
+- Make no persistent configuration changes unless the user explicitly asks.
 
-Announce automatically after a milestone — or when you are blocked and need the user:
-- **Planning complete** - a plan or todo list is finalized
-- **Issue resolved** - a bug fix or error is resolved
-- **Summary generated** - a sprint or major task is completed
-- **Input needed** - you have a question, or need a decision, direction, or approval before continuing. The user may be away or running several agents, so speak up so they know to come back.
+## Decide whether to speak
 
-## When NOT to Announce
+| Event | Mode | Action |
+|---|---|---|
+| A substantial plan is finalized | Notify | Announce the objective and major phases, then continue |
+| A long-running build, test, deployment, release, research, or monitoring operation changes phase | Notify | Announce a meaningful status transition, then continue |
+| A major task completes or its final handoff is lengthy | Notify | Announce the outcome and where details are available |
+| A transient failure has a safe recovery path | Silent | Recover within the retry budget |
+| A fallback succeeds after a meaningful failure | Notify if useful | State the degraded path or limitation, then continue |
+| A retry budget is exhausted or a terminal failure remains | Intervene | State the blocker and exact help needed |
+| Approval, authentication, a consequential decision, manual action, or external-state change is required | Intervene | Announce once, provide the full request in text, then stop |
+| A wait or monitoring poll is unchanged | Silent | Keep waiting without repeated announcements |
+| A routine edit, tool call, short answer, or intermediate test passes | Silent | Continue normally |
 
-Stay silent for:
-- Trivial or intermediate steps (single edits, mid-task progress, routine tool calls)
-- Output that is already short text the user is reading right now
-- Non-interactive, headless, or CI runs (no one is listening)
-- When the user has asked for quiet, or already heard an announcement for the same milestone
-- More than once per logical milestone — do not narrate every step
+## Long-running work
 
-## Identify the Speaker
+Do not emit spoken heartbeats for every poll or tool call. Announce a checkpoint only when at least one of these is true:
 
-Many agents may be announcing from different projects and tmux sessions at the same time, so every announcement MUST start by saying who is speaking. Lead with a short spoken label, then the message:
+- A major phase completed or the expected completion time materially changed.
+- Roughly ten minutes of extended work passed without a spoken update and there is a meaningful delta.
+- A long operation completed, failed, timed out, or now requires human action.
 
-> "<speaker> says: <message>"
+Limit long-running updates to roughly one every ten minutes unless a new blocker requires immediate attention. Say what changed, what happens next, and whether the user is needed.
 
-Determine the label once and cache it as `speaker` in `.claude/tts-config.json`:
-- Default to the project directory name:
-  ```bash
-  basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-  ```
-- Override via the `speaker` field in config for a custom phrase (e.g. `"Claude on the auth service"`).
+## Human intervention
 
-Keep the preamble short — it is spoken before every announcement. Good: "mcp-tts says: ...", "On the auth service, ...", "Claude on project X: ...". This identifies the source even when several projects share the same `say` voice.
+Intervene when the agent cannot safely or usefully continue without the user:
 
-## Choosing a Provider (fail fast — never probe secrets)
+- The next action needs new authority or approval.
+- A consequential choice would materially change scope, behavior, cost, or risk.
+- Authentication, a credential rotation, a GUI/device action, or another manual step is required.
+- A non-retryable permission, configuration, missing-tool, or unsupported-environment error blocks progress.
+- A bounded retry budget is exhausted with no distinct safe recovery path.
+- An external dependency must change state before work can resume.
 
-Pick the provider **once**, cheaply. Do not inspect environment variables or shell startup files to discover credentials, and do not call every cloud provider just to see which one fails.
+For the same transient, idempotent failure, make at most two safe recovery attempts. Do not retry authentication failures, permission denials, invalid arguments, missing tools, unsupported sessions, or destructive operations merely to avoid asking for help.
 
-1. **Reuse a saved choice** - if `.claude/tts-config.json` exists, use it and skip detection.
-2. **No saved choice -> use `say_tts` directly.** Leave `voice` unset unless Voice Identity has intentionally assigned exact installed `say` voices. This is the common case and must be instant.
-3. **Use a cloud provider only when the user or saved config selects one.** Preference is google, then openai, then elevenlabs, with `say_tts` as the final fallback. Optionally assign per-message voices (see Voice Identity).
-4. **On cloud auth/config errors, fall back.** Mark that provider unavailable in `.claude/tts-config.json` and use the next saved provider or `say_tts`.
-5. **Persist intentional choices** in `.claude/tts-config.json` so later announcements skip detection.
+An intervention announcement must contain:
 
-`say_tts` with `voice` unset is the guaranteed last resort and does not require credential discovery.
+1. The project or agent identity.
+2. The blocked outcome in plain language.
+3. The exact decision or action needed.
+4. Whether work is paused or a safe fallback is continuing.
+
+Speech never replaces the written question or approval request. Follow the host's normal interaction rules, then wait when user input is genuinely blocking.
+
+## Build the spoken message
+
+Start with a short source label:
+
+> "<project or agent> says: <outcome>. <next action or help needed>."
+
+Use the repository name by default. If several agents share a repository and a task/session label is already known, include that label. Do not run broad discovery or persist a label solely for speech.
+
+Keep messages to 20–50 words and one to three short sentences. Include only:
+
+- The outcome or current state.
+- A failed, skipped, or pending check when it changes the truth.
+- The next action, or the exact help needed.
+
+If the textual handoff will exceed roughly 200 words or contains several findings, speak only a digest. Never read a full summary, diff, file list, command transcript, log, stack trace, URL, or test matrix aloud.
+
+Transform text for speech:
+
+- Replace paths with a filename or component name.
+- Replace hashes and opaque IDs with their purpose.
+- Replace URLs with “the link in chat.”
+- Replace long lists with a count and the most important item.
+- Expand ambiguous abbreviations when pronunciation matters.
+- Use calm, direct language; do not dramatize failures.
+
+## Choose a TTS tool
+
+Use only tools present in the current MCP tool catalog. Do not probe `PATH`, credentials, environment variables, or shell startup files.
+
+- **Local-only default:** when `say_tts` or `voice_tts` is exposed, use those tools directly. Do not call the interactive `tts` dispatcher or try cloud providers speculatively.
+- **Urgent intervention:** prefer `say_tts` because it starts quickly. If it is unavailable, keep the textual request and do not delay it by cycling through slow providers.
+- **Plans, long-running checkpoints, and summaries:** prefer `voice_tts` when it is registered; it is local and expressive but has several seconds of model startup. Otherwise use `say_tts`.
+- **Cloud providers:** use only the one provider explicitly selected by the user or an existing user-created configuration, and never for sensitive material. Do not fan out across cloud providers.
+- **Cloud failure:** on quota, token, authentication, or configuration failure, disable automatic cloud TTS for the rest of the session and use a local tool if available; otherwise remain text-only. A later explicit user request may select one cloud provider again.
+
+Do not ask the user to choose a provider merely because several tools are exposed—the privacy-preserving, zero-API-token local behavior is the default. Ask once only when the user requests a cloud voice without naming a provider, or when no local tool is available, at least one cloud tool is exposed, and spoken output is still desired. Treat a one-off correction as a session choice; persist it only when the user asks to remember or make it the default.
+
+Treat the live MCP input schema as authoritative. Read [references/providers.md](references/providers.md) before selecting non-default parameters, applying fallback behavior, or honoring an existing provider configuration.
+
+For optional per-project voice identity explicitly requested by the user, also read [references/voice-pools.json](references/voice-pools.json).
 
 ## Workflow
 
-1. Detect the message type — planning, issue, summary, or question (input needed).
-2. Pick the provider (above) — cached from `.claude/tts-config.json` if present, else use `say_tts`.
-3. Transform the text to speech-friendly form (see Text Transformation), and prepend the speaker label (see Identify the Speaker).
-4. Call the chosen TTS tool. On error, fall back per the Error Handling table; `say_tts` is the guaranteed final step.
-
-## Error Handling
-
-An announcement is best-effort — never let it block or derail the main task. On any failure, fall back; the final fallback (`say_tts` with `voice` unset) needs no key.
-
-| Error pattern | Action |
-|---------------|--------|
-| "API key", "unauthorized", "authentication", "...API_KEY is not set" | Mark provider unavailable in `.claude/tts-config.json`, use next |
-| "rate limit", "quota", "429" | Use next provider (temporary) |
-| "402", "payment", "paid_plan_required" (ElevenLabs library voice on a free-tier key) | Switch to a premade voice (e.g. unset `ELEVENLABS_VOICE_ID`) or use next provider |
-| Other errors | Use next provider |
-
-**Persist auth/config failures.** When a provider fails for a missing key, add it to `unavailable_providers` in `.claude/tts-config.json` so it is skipped next time:
-```json
-{
-  "provider_order": ["openai", "say"],
-  "unavailable_providers": ["google"]
-}
-```
-
-## Text Transformation
-
-Convert verbose output to conversational speech:
-
-| Remove/Replace | With |
-|----------------|------|
-| URLs | "see the link" or omit |
-| Code blocks | "see the code changes" or brief description |
-| File paths | Just the filename (e.g., `/src/lib/foo.rs` -> "foo.rs") |
-| Long hashes/IDs | "a commit hash" or omit |
-| Long number lists | "several values" or count |
-| Markdown formatting | Plain text |
-| Technical jargon | Simpler alternatives when possible |
-
-**Target length**: ~15-30 seconds of speech (roughly 50-100 words).
-
-**Tone by type**:
-- Planning: "Here's the plan..." (forward-looking, organized)
-- Issue: "Found a problem..." (alert but calm)
-- Summary: "All done..." (satisfied, accomplished)
-- Question: "I need your input on..." (direct — clearly state the question or decision, then stop and wait)
-
-A `question` announcement reuses the `issue` voice if no dedicated voice is assigned (both signal the user is needed).
-
-## TTS Tools
-
-### say_tts (default — local, free, no API key)
-```
-mcp__mcp-tts__say_tts
-- text: string (required)
-- voice: string (optional; any installed macOS voice — see `say -v '?'`)
-- rate: integer (50-500; recommended 200-250; default 200)
-```
-- Prefer leaving `voice` unset to use the host's configured System Voice. This is required to preserve the same behavior as a plain terminal `say "text"` command, including Siri System Voices.
-- If `voice` unset is silent while plain `say "text"` works, treat that as an MCP server/process bug or stale server process, not as a reason to hardcode a downloaded voice.
-- If Voice Identity intentionally chooses a `say` voice, pass only an exact installed name from `/usr/bin/say -v '?'`.
-- Rate hard limit is 50-500; keep 200-250 for comfortable listening, go higher only when the user explicitly asks.
-
-### google_tts (cloud, preferred when configured)
-```
-mcp__mcp-tts__google_tts
-- text: string (required)
-- voice: string (default: "Kore")
-- model: string (default: "gemini-3.1-flash-tts-preview")
-```
-Voices: Achernar, Achird, Algenib, Algieba, Alnilam, Aoede, Autonoe, Callirrhoe, Charon, Despina, Enceladus, Erinome, Fenrir, Gacrux, Iapetus, Kore, Laomedeia, Leda, Orus, Puck, Pulcherrima, Rasalgethi, Sadachbia, Sadaltager, Schedar, Sulafat, Umbriel, Vindemiatrix, Zephyr, Zubenelgenubi
-
-### openai_tts (cloud fallback)
-```
-mcp__mcp-tts__openai_tts
-- text: string (required)
-- voice: string (default: "alloy") - alloy, ash, ballad, coral, echo, fable, nova, onyx, sage, shimmer, verse
-- model: string (default: "gpt-4o-mini-tts-2025-12-15") - accepted: gpt-4o-mini-tts-2025-12-15, tts-1, tts-1-hd
-- speed: number (0.25-4.0, default: 1.0)
-- instructions: string (voice modulation hints)
-```
-`voice` and `model` are enforced enums — use only the values listed above, do not improvise.
-
-### elevenlabs_tts (cloud fallback)
-```
-mcp__mcp-tts__elevenlabs_tts
-- text: string (required)
-```
-- Voice/model are not tool parameters; they come from the server defaults (premade "Sarah") or the `ELEVENLABS_VOICE_ID` / `ELEVENLABS_MODEL_ID` env vars.
-- **Free-tier API keys can only use premade voices.** A Voice Library (community/professional) voice returns HTTP 402 `paid_plan_required` — handle per the Error Handling table.
-
-## Voice Identity (optional, cloud or explicit say voices)
-
-Skip this unless distinct per-project or per-message voices are wanted. It exists so each project and message type can be recognized from another room.
-
-For cloud providers:
-1. Read `references/voice-pools.json` for candidate voices per provider and message type.
-2. Check `~/.claude/tts-assignments.json` for voices already used by other projects (avoid reuse).
-3. Pick one voice per message type (planning/issue/summary) from the configured provider's pool.
-4. Save to `.claude/tts-config.json` and record in `~/.claude/tts-assignments.json`.
-
-For macOS `say`:
-1. Run `/usr/bin/say -v '?'` and parse the exact installed voice names.
-2. Prefer installed Premium voices first, then Enhanced voices, then stable legacy voices such as `Samantha` or `Alex`.
-3. Choose different voices for `planning`, `issue`/`question`, and `summary` only when good matches exist.
-4. If a message type has no good installed candidate, leave `voice` unset for that type so the host System Voice is used.
-5. Do not infer that the host default is broken, and do not replace an unset voice as a fallback. Passing a voice is an intentional identity choice only.
-
-Example `.claude/tts-config.json`:
-```json
-{
-  "speaker": "mcp-tts",
-  "provider_order": ["google", "say"],
-  "unavailable_providers": [],
-  "voices": {
-    "planning": { "provider": "google", "voice": "Kore" },
-    "issue": { "provider": "google", "voice": "Aoede" },
-    "summary": { "provider": "google", "voice": "Charon" }
-  }
-}
-```
+1. Classify the event as silent, notify, or intervene.
+2. Write the required user-facing status, result, or question in the normal channel.
+3. Create a 20–50 word speech-safe digest with the source label.
+4. Select an available local tool based on urgency; use cloud only by explicit prior choice.
+5. Attempt speech within the bounded fallback policy, then continue or stop according to the main task—not according to TTS success.
 
 ## Examples
 
-Each example leads with the speaker label so the listener knows which project/agent is talking.
+**Long operation completed**
 
-**Planning** (after TodoWrite with multiple items):
-> "mcp-tts says: Here's the plan for the authentication feature. First, I'll create the login component. Then add session management. Finally, write the tests. Three tasks total."
+> "mcp-tts says: The release build finished and all required checks passed. The full artifact list is in chat."
 
-**Issue** (after fixing an error):
-> "mcp-tts says: Found and fixed an issue. The rate limiter wasn't catching timeout errors. Added a try-catch block in the handler. Tests are passing now."
+**Lengthy final handoff**
 
-**Summary** (after completing a feature):
-> "mcp-tts says: All done with the authentication system. Added login, logout, and session management. Created five new files and updated the main router. Ready for review."
+> "ipsw says: The restore review is complete. I found two blocking safety issues and one follow-up; the evidence and file locations are in chat."
 
-**Question** (blocked, needs a decision):
-> "mcp-tts says: I need your input. Should the session tokens expire after one hour or stay valid for a day? I'll wait for your call before wiring up the middleware."
+**Blocking intervention**
+
+> "mcp-tts says: The Homebrew publication needs a new GitHub token. I posted the exact rotation steps and paused before tagging the release."
+
+**Retry budget exhausted**
+
+> "deployment agent says: The deploy failed twice with the same permission denial. I need access restored before I can continue."
+
+**Long-running checkpoint**
+
+> "firmware analysis says: Extraction finished and binary analysis is underway. No input is needed; I’ll speak again only at completion or if blocked."
+
+## Completion check
+
+Before returning:
+
+- Was this transition important enough to interrupt the user?
+- Does the spoken message match the verified textual truth?
+- Is it under 50 words and free of sensitive details?
+- If help is required, does it name one exact action and say that work is paused?
+- Has this same transition already been announced?
+
+If any answer is wrong, revise the message or stay silent.

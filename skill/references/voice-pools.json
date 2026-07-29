@@ -1,4 +1,19 @@
 {
+  "voice": {
+    "note": "voice_tts is available only when registered by the MCP server. It runs locally without an API key but takes several seconds to load, so prefer it for plans and summaries rather than urgent intervention alerts. Use tier small for routine announcements. The voice and describe parameters conflict.",
+    "planning": [
+      { "voice": "Ryan", "description": "steady and organized", "style": "calm, clear, and forward-looking" },
+      { "voice": "Aiden", "description": "warm and collaborative", "style": "measured and concise" }
+    ],
+    "issue": [
+      { "voice": "Ryan", "description": "direct but non-urgent", "style": "calm, precise, and reassuring" },
+      { "voice": "Aiden", "description": "attentive but non-urgent", "style": "focused and matter-of-fact" }
+    ],
+    "summary": [
+      { "voice": "Ryan", "description": "confident completion", "style": "warm, concise, and satisfied" },
+      { "voice": "Aiden", "description": "friendly completion", "style": "clear and quietly upbeat" }
+    ]
+  },
   "google": {
     "planning": [
       { "voice": "Kore", "description": "calm, professional" },

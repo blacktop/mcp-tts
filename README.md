@@ -408,13 +408,16 @@ This copies the skill to `~/.agents/skills/speak` and creates symlinks for Claud
 
 ### How It Works
 
-The skill triggers automatically after:
+The skill should be selected after:
+
 - **Planning complete** - When a plan/todo list is finalized
 - **Issue resolved** - When a bug fix or error is resolved
 - **Summary generated** - When completing a major task
+- **Long operation changes state** - When a build, test, deployment, release, research, or monitoring phase completes or fails
+- **Human intervention needed** - When approval, authentication, manual action, or an exhausted retry budget blocks progress
 
-By default, the skill uses local `say_tts` without probing credentials. If a saved config or user choice selects cloud TTS, providers fall back in order: `google` → `openai` → `elevenlabs` → `say` (macOS). If a cloud provider fails due to missing API keys, it's marked unavailable and skipped in future attempts. For local `say` identity, the skill can pick exact installed Premium, Enhanced, or legacy voices from `/usr/bin/say -v '?'`; if no explicit voice is chosen, it leaves `voice` unset so the host System Voice is used.
+The skill defaults to local-only speech without probing credentials: `voice_tts` for plans and summaries when Voice is registered, and fast `say_tts` for urgent alerts or fallback. Both avoid cloud API quotas and keep spoken content on the Mac. Cloud TTS is used only after an explicit user choice or saved configuration. If that cloud provider hits a quota, token, authentication, or configuration failure, automatic cloud TTS is disabled for the session and the skill uses local speech—or remains text-only when no local tool is available. It never tries the other cloud providers automatically. One-off provider corrections last for the session; configuration is updated only when the user asks to remember the choice. For local `say` identity, leave `voice` unset to use the host System Voice unless the user intentionally selected an exact installed voice.
 
 ## License
 
-MIT Copyright (c) 2025 **blacktop**
+MIT
