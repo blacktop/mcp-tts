@@ -20,6 +20,7 @@
 - **`openai_tts_instructions.json`** - OpenAI TTS with custom voice instructions
 - **`openai_tts_comprehensive.json`** - Full OpenAI TTS feature test
 - **`tts_elicitation.jsonl`** - Interactive `tts` request fixture consumed by the Go integration harness; the harness supplies the `elicitation/create` replies, so this is not a standalone stdin transcript
+- **`voice_tts.jsonl`** - Opt-in audible `voice_tts` fixture that verifies registration and calls the tool through MCP stdio
 
 ### **🔍 Other Files**
 - **`main.go`** - Go-based test runner
@@ -43,6 +44,12 @@
 ### Full Test Suite
 ```bash
 ./auto_test.sh
+```
+
+### Live Voice MCP Test
+Requires `voice-say` on `PATH` and speaks aloud:
+```fish
+env MCP_TTS_LIVE_VOICE_TEST=true go test -run TestMCPIntegration_VoiceTTSJSONL -v .
 ```
 
 ### Security Testing

@@ -44,7 +44,7 @@ The tool is registered only when `voice-say` is resolvable on `PATH`. Optional p
 
 Voice plays audio directly and does not support `--output-dir`; with `--no-play`, calls fail without launching `voice-say`.
 
-> [!CAUTION]
+> [!WARNING]
 > The Voice repository is currently private and will be released publicly soon, so the link requires access for now.
 
 ### `elevenlabs_tts`

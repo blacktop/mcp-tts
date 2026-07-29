@@ -655,6 +655,77 @@ func TestMCPIntegration_ToolsList(t *testing.T) {
 	}
 }
 
+func TestMCPIntegration_VoiceTTSJSONL(t *testing.T) {
+	if os.Getenv("MCP_TTS_LIVE_VOICE_TEST") != "true" {
+		t.Skip("set MCP_TTS_LIVE_VOICE_TEST=true to run the audible voice_tts MCP test")
+	}
+	_, err := exec.LookPath("voice-say")
+	require.NoError(t, err, "voice-say must be available on PATH for the live test")
+
+	messages := parseJSONLMessages(t, "test/json/voice_tts.jsonl")
+	var initMsg *MCPMessage
+	var toolCallMsg *MCPMessage
+	for i := range messages {
+		switch messages[i].Method {
+		case "initialize":
+			initMsg = &messages[i]
+		case "tools/call":
+			toolCallMsg = &messages[i]
+		}
+	}
+	require.NotNil(t, initMsg, "fixture should contain initialize")
+	require.NotNil(t, toolCallMsg, "fixture should contain tools/call")
+
+	initParamsJSON, err := json.Marshal(initMsg.Params)
+	require.NoError(t, err)
+	var initParams InitializeParams
+	require.NoError(t, json.Unmarshal(initParamsJSON, &initParams))
+
+	toolParams, ok := toolCallMsg.Params.(map[string]any)
+	require.True(t, ok, "tool call params should be a map")
+	name, ok := toolParams["name"].(string)
+	require.True(t, ok, "tool call should specify a tool name")
+	require.Equal(t, "voice_tts", name)
+	args, ok := toolParams["arguments"]
+	require.True(t, ok, "tool call should include arguments")
+
+	runner := NewMCPTestRunner(t)
+	defer runner.Close()
+
+	require.NoError(t, runner.initializeWithParams(requireMessageIDInt(t, initMsg.ID), initParams))
+
+	listResponse, err := runner.listTools()
+	require.NoError(t, err, "tools/list should succeed")
+	listResult, ok := listResponse.Result.(map[string]any)
+	require.True(t, ok, "tools/list result should be a map")
+	tools, ok := listResult["tools"].([]any)
+	require.True(t, ok, "tools/list result should contain tools")
+	require.Condition(t, func() bool {
+		for _, tool := range tools {
+			toolMap, mapOK := tool.(map[string]any)
+			if mapOK && toolMap["name"] == "voice_tts" {
+				return true
+			}
+		}
+		return false
+	}, "voice_tts should be registered when voice-say is on PATH")
+
+	response, err := runner.callTool(requireMessageIDInt(t, toolCallMsg.ID), name, args)
+	require.NoError(t, err, "voice_tts MCP call should succeed")
+	require.Nil(t, response.Error, "voice_tts should not return a JSON-RPC error")
+	result, ok := response.Result.(map[string]any)
+	require.True(t, ok, "tool result should be a map")
+	assert.NotEqual(t, true, result["isError"], "voice_tts should not return an error result")
+	content, ok := result["content"].([]any)
+	require.True(t, ok, "tool result should contain content")
+	require.NotEmpty(t, content)
+	textContent, ok := content[0].(map[string]any)
+	require.True(t, ok, "tool content should be a map")
+	text, ok := textContent["text"].(string)
+	require.True(t, ok, "tool content should include text")
+	assert.Contains(t, text, "Speaking:")
+}
+
 func TestMCPIntegration_TTSInteractiveJSONL(t *testing.T) {
 	text := interactiveTTSTextResult(
 		t,
