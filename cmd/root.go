@@ -437,6 +437,7 @@ var rootCmd = &cobra.Command{
 Provides multiple text-to-speech services via MCP protocol:
 
 • say_tts - Uses macOS built-in 'say' command (macOS only)
+• voice_tts - Uses local Qwen3-TTS through voice-say (when available on PATH)
 • elevenlabs_tts - Uses ElevenLabs API for high-quality speech synthesis
 • google_tts - Uses Google's Gemini TTS models for natural speech
 • openai_tts - Uses OpenAI's TTS API with various voice options
@@ -566,8 +567,9 @@ Designed to be used with the MCP (Model Context Protocol).`,
 				// other sessions are not blocked while the user decides.
 				if input.Voice == nil && input.Rate == nil {
 					content, result, stop := maybeElicitContent(
-						ctx,
 						req,
+						settingsInputID,
+						saySettingsState,
 						"elicit macOS Say settings",
 						"Configure macOS Say settings (or accept defaults):",
 						saySettingsSchema(),
@@ -661,6 +663,8 @@ Designed to be used with the MCP (Model Context Protocol).`,
 				return textResult(formatSaveResult(text, savedPath, true)), nil, nil
 			})
 		}
+
+		registerVoiceTTSTool(s)
 
 		elevenLabsTool := &mcp.Tool{
 			Name:        "elevenlabs_tts",
@@ -802,8 +806,9 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			// other sessions are not blocked while the user decides.
 			if input.Voice == nil && input.Model == nil {
 				content, result, stop := maybeElicitContent(
-					ctx,
 					req,
+					settingsInputID,
+					googleSettingsState,
 					"elicit Google TTS settings",
 					"Configure Google TTS settings (or accept defaults):",
 					googleSettingsSchema(),
@@ -921,8 +926,9 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			// other sessions are not blocked while the user decides.
 			if input.Voice == nil && input.Model == nil && input.Speed == nil {
 				content, result, stop := maybeElicitContent(
-					ctx,
 					req,
+					settingsInputID,
+					openAISettingsState,
 					"elicit OpenAI TTS settings",
 					"Configure OpenAI TTS settings (or accept defaults):",
 					openAISettingsSchema(),
@@ -1033,57 +1039,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			}
 
 			providers := availableProviders()
-			if len(providers) == 0 {
-				return errorResult("Error: No TTS providers configured"), nil, nil
-			}
-
-			if !canElicit(req) {
-				p := providers[0]
-				return textResult(buildProviderRecommendation(
-					p.ID, p.Name, providerRecommendationArgs(p.ID, text, nil),
-				)), nil, nil
-			}
-
-			provider := providers[0]
-			if len(providers) > 1 {
-				selection := elicitForm(ctx, req.Session,
-					"Which TTS provider would you like to use?",
-					providerSelectionSchema(providers),
-				)
-				if result, stop := elicitationStopResult(selection, "elicit TTS provider selection"); stop {
-					return result, nil, nil
-				}
-				var cancelled bool
-				var err error
-				provider, cancelled, err = chooseProvider(providers, selection)
-				if err != nil {
-					return errorResult(fmt.Sprintf("Error: %v", err)), nil, nil
-				}
-				if cancelled {
-					return textResult("Request cancelled"), nil, nil
-				}
-			}
-
-			var settingsContent map[string]any
-			if settingsSchema := settingsSchemaForProvider(provider.ID); settingsSchema != nil {
-				content, result, stop := maybeElicitContent(
-					ctx,
-					req,
-					"elicit TTS voice settings",
-					"Configure voice settings (or accept defaults):",
-					settingsSchema,
-				)
-				if stop {
-					return result, nil, nil
-				}
-				settingsContent = content
-			}
-
-			return textResult(buildProviderRecommendation(
-				provider.ID,
-				provider.Name,
-				providerRecommendationArgs(provider.ID, text, settingsContent),
-			)), nil, nil
+			return interactiveTTSResult(ctx, req, text, providers), nil, nil
 		})
 
 		log.Info("Starting MCP server", "name", "mcp-tts", "version", Version)

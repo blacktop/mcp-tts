@@ -32,19 +32,55 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+const (
+	multiRoundTripProtocolVersion = "2026-07-28"
+
+	settingsInputID = "settings"
+
+	saySettingsState    = "say_tts/settings"
+	googleSettingsState = "google_tts/settings"
+	openAISettingsState = "openai_tts/settings"
+
+	ttsProviderInputID     = "provider"
+	ttsProviderState       = "tts/provider"
+	ttsSettingsStatePrefix = "tts/settings/"
+	ttsSettingsMessage     = "Configure voice settings (or accept defaults):"
+)
+
 // canElicit returns true if elicitation is enabled and the request has a
-// session capable of elicitation. Elicitation is opt-in (--elicit /
-// MCP_TTS_ELICIT) because it interrupts the normal agent flow of calling
-// tools with explicit arguments.
+// session that advertises form elicitation. Elicitation is opt-in (--elicit /
+// MCP_TTS_ELICIT) because it interrupts the normal agent flow of calling tools
+// with explicit arguments.
 func canElicit(req *mcp.CallToolRequest) bool {
-	return elicitEnabled && req != nil && req.Session != nil
+	if !elicitEnabled || req == nil || req.Session == nil {
+		return false
+	}
+	return supportsFormElicitation(req.Session.InitializeParams())
+}
+
+func supportsFormElicitation(params *mcp.InitializeParams) bool {
+	if params == nil || params.Capabilities == nil || params.Capabilities.Elicitation == nil {
+		return false
+	}
+
+	// The SDK treats an empty elicitation capability as form support for
+	// backward compatibility. A URL-only capability explicitly excludes it.
+	elicitation := params.Capabilities.Elicitation
+	return elicitation.Form != nil || elicitation.URL == nil
+}
+
+func supportsMultiRoundTrip(req *mcp.CallToolRequest) bool {
+	if req == nil || req.Session == nil {
+		return false
+	}
+	params := req.Session.InitializeParams()
+	return params != nil && params.ProtocolVersion >= multiRoundTripProtocolVersion
 }
 
 type elicitationStatus uint8
 
 const (
-	elicitUnavailable elicitationStatus = iota
-	elicitAccepted
+	elicitAccepted elicitationStatus = iota + 1
 	elicitRejected
 	elicitFailed
 )
@@ -71,47 +107,103 @@ func (r elicitationResult) Cancelled() bool {
 	return errors.Is(r.Err, context.Canceled) || errors.Is(r.Err, context.DeadlineExceeded)
 }
 
-func isUnsupportedElicitationError(err error) bool {
-	if err == nil {
-		return false
+func formElicitationRequest(
+	inputID string,
+	requestState string,
+	message string,
+	schema map[string]any,
+) *mcp.CallToolResult {
+	return &mcp.CallToolResult{
+		InputRequests: mcp.InputRequestMap{
+			inputID: &mcp.ElicitParams{
+				Mode:            "form",
+				Message:         message,
+				RequestedSchema: schema,
+			},
+		},
+		RequestState: requestState,
 	}
-	msg := err.Error()
-	return strings.Contains(msg, "does not support") && strings.Contains(msg, "elicitation")
 }
 
-// elicitForm sends a form elicitation request and classifies the outcome.
-// Unsupported clients return unavailable, explicit user decline/cancel returns
-// rejected, and transport/runtime errors return failed.
-func elicitForm(
+func formElicitationResponse(req *mcp.CallToolRequest, inputID string) elicitationResult {
+	if req == nil || req.Params == nil {
+		return elicitationResult{
+			Status: elicitFailed,
+			Err:    fmt.Errorf("missing tool request parameters"),
+		}
+	}
+
+	response, ok := req.Params.InputResponses[inputID]
+	if !ok {
+		return elicitationResult{
+			Status: elicitFailed,
+			Err:    fmt.Errorf("missing elicitation response %q", inputID),
+		}
+	}
+	result, ok := response.(*mcp.ElicitResult)
+	if !ok || result == nil {
+		return elicitationResult{
+			Status: elicitFailed,
+			Err:    fmt.Errorf("unexpected elicitation response type %T for %q", response, inputID),
+		}
+	}
+
+	return elicitationResponse(result)
+}
+
+func elicitationResponse(result *mcp.ElicitResult) elicitationResult {
+	if result == nil {
+		return elicitationResult{
+			Status: elicitFailed,
+			Err:    fmt.Errorf("missing elicitation result"),
+		}
+	}
+
+	switch result.Action {
+	case "accept":
+		return elicitationResult{
+			Status:  elicitAccepted,
+			Content: result.Content,
+		}
+	case "decline", "cancel":
+		log.Debug("User declined elicitation", "action", result.Action)
+		return elicitationResult{Status: elicitRejected}
+	default:
+		return elicitationResult{
+			Status: elicitFailed,
+			Err:    fmt.Errorf("unexpected elicitation action %q", result.Action),
+		}
+	}
+}
+
+func legacyElicitForm(
 	ctx context.Context,
-	session *mcp.ServerSession,
+	req *mcp.CallToolRequest,
 	message string,
 	schema map[string]any,
 ) elicitationResult {
-	if session == nil {
-		return elicitationResult{Status: elicitUnavailable}
+	if req == nil || req.Session == nil {
+		return elicitationResult{
+			Status: elicitFailed,
+			Err:    fmt.Errorf("missing MCP session"),
+		}
+	}
+	if supportsMultiRoundTrip(req) {
+		return elicitationResult{
+			Status: elicitFailed,
+			Err:    fmt.Errorf("legacy elicitation attempted with a multi-round-trip client"),
+		}
 	}
 
-	result, err := session.Elicit(ctx, &mcp.ElicitParams{
+	result, err := req.Session.Elicit(ctx, &mcp.ElicitParams{
+		Mode:            "form",
 		Message:         message,
 		RequestedSchema: schema,
 	})
 	if err != nil {
-		if isUnsupportedElicitationError(err) {
-			log.Debug("Elicitation not available", "error", err)
-			return elicitationResult{Status: elicitUnavailable}
-		}
-		log.Warn("Elicitation failed", "error", err, "message", message)
 		return elicitationResult{Status: elicitFailed, Err: err}
 	}
-	if result.Action != "accept" {
-		log.Debug("User declined elicitation", "action", result.Action)
-		return elicitationResult{Status: elicitRejected}
-	}
-	return elicitationResult{
-		Status:  elicitAccepted,
-		Content: result.Content,
-	}
+	return elicitationResponse(result)
 }
 
 func elicitString(content map[string]any, key string) string {
@@ -406,8 +498,9 @@ func elicitationStopResult(result elicitationResult, action string) (*mcp.CallTo
 }
 
 func maybeElicitContent(
-	ctx context.Context,
 	req *mcp.CallToolRequest,
+	inputID string,
+	requestState string,
 	action string,
 	message string,
 	schema map[string]any,
@@ -416,12 +509,156 @@ func maybeElicitContent(
 		return nil, nil, false
 	}
 
-	result := elicitForm(ctx, req.Session, message, schema)
+	if req.Params == nil {
+		return nil, errorResult(fmt.Sprintf("Error: Failed to %s: missing tool request parameters", action)), true
+	}
+	if req.Params.RequestState == "" {
+		return nil, formElicitationRequest(inputID, requestState, message, schema), true
+	}
+	if req.Params.RequestState != requestState {
+		return nil, errorResult(fmt.Sprintf(
+			"Error: Failed to %s: unexpected request state %q",
+			action,
+			req.Params.RequestState,
+		)), true
+	}
+
+	result := formElicitationResponse(req, inputID)
 	if stopResult, stop := elicitationStopResult(result, action); stop {
 		return nil, stopResult, true
 	}
 
 	return result.Content, nil, false
+}
+
+func providerByID(providers []providerOption, providerID string) (providerOption, bool) {
+	for _, provider := range providers {
+		if provider.ID == providerID {
+			return provider, true
+		}
+	}
+	return providerOption{}, false
+}
+
+func providerRecommendationResult(
+	text string,
+	provider providerOption,
+	content map[string]any,
+) *mcp.CallToolResult {
+	return textResult(buildProviderRecommendation(
+		provider.ID,
+		provider.Name,
+		providerRecommendationArgs(provider.ID, text, content),
+	))
+}
+
+func ttsSettingsOrRecommendation(text string, provider providerOption) *mcp.CallToolResult {
+	settingsSchema := settingsSchemaForProvider(provider.ID)
+	if settingsSchema == nil {
+		return providerRecommendationResult(text, provider, nil)
+	}
+
+	return formElicitationRequest(
+		settingsInputID,
+		ttsSettingsStatePrefix+provider.ID,
+		ttsSettingsMessage,
+		settingsSchema,
+	)
+}
+
+func legacyTTSSettingsOrRecommendation(
+	ctx context.Context,
+	req *mcp.CallToolRequest,
+	text string,
+	provider providerOption,
+) *mcp.CallToolResult {
+	settingsSchema := settingsSchemaForProvider(provider.ID)
+	if settingsSchema == nil {
+		return providerRecommendationResult(text, provider, nil)
+	}
+
+	settings := legacyElicitForm(
+		ctx,
+		req,
+		ttsSettingsMessage,
+		settingsSchema,
+	)
+	if result, stop := elicitationStopResult(settings, "elicit TTS voice settings"); stop {
+		return result
+	}
+	return providerRecommendationResult(text, provider, settings.Content)
+}
+
+func interactiveTTSResult(
+	ctx context.Context,
+	req *mcp.CallToolRequest,
+	text string,
+	providers []providerOption,
+) *mcp.CallToolResult {
+	if len(providers) == 0 {
+		return errorResult("Error: No TTS providers configured")
+	}
+	if !canElicit(req) {
+		return providerRecommendationResult(text, providers[0], nil)
+	}
+	if req.Params == nil {
+		return errorResult("Error: Failed to elicit TTS settings: missing tool request parameters")
+	}
+
+	switch {
+	case req.Params.RequestState == "":
+		if len(providers) == 1 {
+			return ttsSettingsOrRecommendation(text, providers[0])
+		}
+		return formElicitationRequest(
+			ttsProviderInputID,
+			ttsProviderState,
+			"Which TTS provider would you like to use?",
+			providerSelectionSchema(providers),
+		)
+
+	case req.Params.RequestState == ttsProviderState:
+		selection := formElicitationResponse(req, ttsProviderInputID)
+		if result, stop := elicitationStopResult(selection, "elicit TTS provider selection"); stop {
+			return result
+		}
+		provider, cancelled, err := chooseProvider(providers, selection)
+		if err != nil {
+			return errorResult(fmt.Sprintf("Error: %v", err))
+		}
+		if cancelled {
+			return textResult("Request cancelled")
+		}
+		if !supportsMultiRoundTrip(req) {
+			// The SDK's compatibility middleware reinvokes legacy handlers only
+			// once. Complete the second step with the legacy nested request API;
+			// modern clients never enter this branch.
+			return legacyTTSSettingsOrRecommendation(ctx, req, text, provider)
+		}
+		return ttsSettingsOrRecommendation(text, provider)
+
+	case strings.HasPrefix(req.Params.RequestState, ttsSettingsStatePrefix):
+		providerID := strings.TrimPrefix(req.Params.RequestState, ttsSettingsStatePrefix)
+		provider, ok := providerByID(providers, providerID)
+		if !ok {
+			return errorResult(fmt.Sprintf(
+				"Error: TTS provider %q is no longer available",
+				providerID,
+			))
+		}
+
+		settings := formElicitationResponse(req, settingsInputID)
+		if result, stop := elicitationStopResult(settings, "elicit TTS voice settings"); stop {
+			return result
+		}
+		return providerRecommendationResult(text, provider, settings.Content)
+
+	default:
+		return errorResult(fmt.Sprintf(
+			"Error: Unexpected interactive TTS request state %q",
+			req.Params.RequestState,
+		))
+	}
 }
 
 // buildProviderRecommendation formats a structured recommendation

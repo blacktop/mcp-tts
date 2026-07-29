@@ -32,8 +32,8 @@ func TestChooseProvider(t *testing.T) {
 		assert.True(t, cancelled)
 	})
 
-	t.Run("unavailable elicitation falls back to first provider", func(t *testing.T) {
-		provider, cancelled, err := chooseProvider(providers, elicitationResult{Status: elicitUnavailable})
+	t.Run("empty result falls back to first provider", func(t *testing.T) {
+		provider, cancelled, err := chooseProvider(providers, elicitationResult{})
 		require.NoError(t, err)
 		assert.False(t, cancelled)
 		assert.Equal(t, ProviderSay, provider.ID)
@@ -119,27 +119,138 @@ func TestProviderRecommendationArgs(t *testing.T) {
 	})
 }
 
-func TestIsUnsupportedElicitationError(t *testing.T) {
-	assert.True(t, isUnsupportedElicitationError(errors.New("client does not support elicitation")))
-	assert.True(t, isUnsupportedElicitationError(errors.New(`client does not support "form" elicitation`)))
-	assert.False(t, isUnsupportedElicitationError(context.Canceled))
-	assert.False(t, isUnsupportedElicitationError(errors.New("socket closed")))
+func TestSupportsFormElicitation(t *testing.T) {
+	tests := []struct {
+		name   string
+		params *mcp.InitializeParams
+		want   bool
+	}{
+		{name: "missing initialization"},
+		{
+			name:   "missing capabilities",
+			params: &mcp.InitializeParams{},
+		},
+		{
+			name: "missing elicitation capability",
+			params: &mcp.InitializeParams{
+				Capabilities: &mcp.ClientCapabilities{},
+			},
+		},
+		{
+			name: "modern form capability",
+			params: &mcp.InitializeParams{
+				ProtocolVersion: "2025-11-25",
+				Capabilities: &mcp.ClientCapabilities{
+					Elicitation: &mcp.ElicitationCapabilities{
+						Form: &mcp.FormElicitationCapabilities{},
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "modern URL-only capability",
+			params: &mcp.InitializeParams{
+				ProtocolVersion: "2025-11-25",
+				Capabilities: &mcp.ClientCapabilities{
+					Elicitation: &mcp.ElicitationCapabilities{
+						URL: &mcp.URLElicitationCapabilities{},
+					},
+				},
+			},
+		},
+		{
+			name: "modern empty capability means form",
+			params: &mcp.InitializeParams{
+				ProtocolVersion: "2025-11-25",
+				Capabilities: &mcp.ClientCapabilities{
+					Elicitation: &mcp.ElicitationCapabilities{},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "legacy empty capability means form",
+			params: &mcp.InitializeParams{
+				ProtocolVersion: "2024-11-05",
+				Capabilities: &mcp.ClientCapabilities{
+					Elicitation: &mcp.ElicitationCapabilities{},
+				},
+			},
+			want: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.want, supportsFormElicitation(test.params))
+		})
+	}
+}
+
+func TestFormElicitationRequest(t *testing.T) {
+	schema := map[string]any{"type": "object"}
+	result := formElicitationRequest("voice", "say/settings", "Choose a voice", schema)
+
+	assert.Equal(t, "say/settings", result.RequestState)
+	require.Len(t, result.InputRequests, 1)
+	request, ok := result.InputRequests["voice"].(*mcp.ElicitParams)
+	require.True(t, ok)
+	assert.Equal(t, "form", request.Mode)
+	assert.Equal(t, "Choose a voice", request.Message)
+	assert.Equal(t, schema, request.RequestedSchema)
+}
+
+func TestFormElicitationResponse(t *testing.T) {
+	request := func(response mcp.InputResponse) *mcp.CallToolRequest {
+		return &mcp.CallToolRequest{
+			Params: &mcp.CallToolParamsRaw{
+				InputResponses: mcp.InputResponseMap{"voice": response},
+			},
+		}
+	}
+
+	t.Run("accepted response returns content", func(t *testing.T) {
+		content := map[string]any{"voice": "Samantha"}
+		result := formElicitationResponse(request(&mcp.ElicitResult{
+			Action:  "accept",
+			Content: content,
+		}), "voice")
+		assert.True(t, result.Accepted())
+		assert.Equal(t, content, result.Content)
+	})
+
+	for _, action := range []string{"decline", "cancel"} {
+		t.Run(action+" response rejects the request", func(t *testing.T) {
+			result := formElicitationResponse(request(&mcp.ElicitResult{Action: action}), "voice")
+			assert.True(t, result.Rejected())
+		})
+	}
+
+	t.Run("missing response fails", func(t *testing.T) {
+		result := formElicitationResponse(&mcp.CallToolRequest{
+			Params: &mcp.CallToolParamsRaw{},
+		}, "voice")
+		assert.True(t, result.Failed())
+		assert.ErrorContains(t, result.Err, `missing elicitation response "voice"`)
+	})
+
+	t.Run("unexpected response type fails", func(t *testing.T) {
+		result := formElicitationResponse(request(&mcp.ListRootsResult{}), "voice")
+		assert.True(t, result.Failed())
+		assert.ErrorContains(t, result.Err, "unexpected elicitation response type")
+	})
+
+	t.Run("unexpected action fails", func(t *testing.T) {
+		result := formElicitationResponse(request(&mcp.ElicitResult{Action: "unknown"}), "voice")
+		assert.True(t, result.Failed())
+		assert.ErrorContains(t, result.Err, `unexpected elicitation action "unknown"`)
+	})
 }
 
 func TestElicitationStopResult(t *testing.T) {
 	t.Run("rejected elicitation returns cancellation text", func(t *testing.T) {
 		result, stop := elicitationStopResult(elicitationResult{Status: elicitRejected}, "elicit provider selection")
-		require.True(t, stop)
-		require.NotNil(t, result)
-		assert.False(t, result.IsError)
-		assert.Equal(t, "Request cancelled", result.Content[0].(*mcp.TextContent).Text)
-	})
-
-	t.Run("cancellation returns non-error cancellation text", func(t *testing.T) {
-		result, stop := elicitationStopResult(elicitationResult{
-			Status: elicitFailed,
-			Err:    context.Canceled,
-		}, "elicit provider selection")
 		require.True(t, stop)
 		require.NotNil(t, result)
 		assert.False(t, result.IsError)
@@ -157,8 +268,19 @@ func TestElicitationStopResult(t *testing.T) {
 		assert.Contains(t, result.Content[0].(*mcp.TextContent).Text, "Failed to elicit provider selection")
 	})
 
+	t.Run("context cancellation returns non-error cancellation text", func(t *testing.T) {
+		result, stop := elicitationStopResult(elicitationResult{
+			Status: elicitFailed,
+			Err:    context.Canceled,
+		}, "elicit provider selection")
+		require.True(t, stop)
+		require.NotNil(t, result)
+		assert.False(t, result.IsError)
+		assert.Equal(t, "Request cancelled", result.Content[0].(*mcp.TextContent).Text)
+	})
+
 	t.Run("non-failure keeps the caller running", func(t *testing.T) {
-		result, stop := elicitationStopResult(elicitationResult{Status: elicitUnavailable}, "elicit provider selection")
+		result, stop := elicitationStopResult(elicitationResult{}, "elicit provider selection")
 		assert.False(t, stop)
 		assert.Nil(t, result)
 	})

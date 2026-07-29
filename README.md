@@ -3,6 +3,8 @@
   <h1 align="center">mcp-tts</h1>
   <h4><p align="center">MCP Server for TTS (Text-to-Speech)</p></h4>
   <p align="center">
+    <a href="https://mcptoplist.com/server/mcp.so%2Fmcp-tts%2Fblackto" alt="Actions">
+          <img src="https://mcptoplist.com/badge/mcp.so%2Fmcp-tts%2Fblacktop.svg" /></a>
     <a href="https://github.com/blacktop/mcp-tts/actions" alt="Actions">
           <img src="https://github.com/blacktop/mcp-tts/actions/workflows/go.yml/badge.svg" /></a>
     <a href="https://github.com/blacktop/mcp-tts/releases/latest" alt="Downloads">
@@ -18,8 +20,9 @@
 
 Adds Text-to-Speech to things like Claude Desktop and Cursor IDE.  
 
-It registers four TTS tools: 
+It registers the existing TTS tools, plus `voice_tts` when `voice-say` is available on `PATH`:
  - `say_tts` 
+ - `voice_tts` (when available)
  - `elevenlabs_tts`
  - `google_tts`
  - `openai_tts`
@@ -27,6 +30,22 @@ It registers four TTS tools:
 ### `say_tts`
 
 Uses the macOS `say` binary to speak the text with built-in system voices
+
+### `voice_tts`
+
+Uses the local `voice-say` CLI from [Voice](https://github.com/blacktop/Voice) to run Qwen3-TTS through MLX. Voice needs no API key and keeps text and audio on the Mac. The model reloads for every invocation, so startup typically takes several seconds; prefer it for summaries and announcements rather than time-critical alerts.
+
+The tool is registered only when `voice-say` is resolvable on `PATH`. Optional parameters are:
+
+- `voice`: preset voice `Ryan` or `Aiden`
+- `tier`: `small` for faster 0.6B synthesis or `large` for higher-quality 1.7B synthesis
+- `style`: free-text delivery guidance
+- `describe`: free-text voice design; forces the 1.7B model and cannot be combined with `voice`
+
+Voice plays audio directly and does not support `--output-dir`; with `--no-play`, calls fail without launching `voice-say`.
+
+> [!CAUTION]
+> The Voice repository is currently private and will be released publicly soon, so the link requires access for now.
 
 ### `elevenlabs_tts`
 
@@ -122,6 +141,7 @@ Files are saved with unique names: `tts_{timestamp}_{hash}.{ext}`
 | Provider | Format |
 |----------|--------|
 | macOS say | AIFF |
+| Voice | Playback only |
 | ElevenLabs | MP3 |
 | Google TTS | WAV |
 | OpenAI TTS | MP3 |
@@ -142,6 +162,7 @@ TTS (text-to-speech) MCP Server.
 Provides multiple text-to-speech services via MCP protocol:
 
 • say_tts - Uses macOS built-in 'say' command (macOS only)
+• voice_tts - Uses local Qwen3-TTS through voice-say (when available on PATH)
 • elevenlabs_tts - Uses ElevenLabs API for high-quality speech synthesis
 • google_tts - Uses Google's Gemini TTS models for natural speech
 • openai_tts - Uses OpenAI's TTS API with various voice options

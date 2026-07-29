@@ -11,9 +11,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -674,6 +676,95 @@ func TestMCPIntegration_TTSInteractiveJSONL(t *testing.T) {
 	assert.Contains(t, text, `"voice":"alloy"`)
 	assert.Contains(t, text, `"model":"gpt-4o-mini-tts-2025-12-15"`)
 	assert.Contains(t, text, `"speed":1`)
+}
+
+func TestMCPIntegration_TTSInteractiveCurrentProtocol(t *testing.T) {
+	t.Setenv("MCP_TTS_ELICIT", "true")
+	t.Setenv("GOOGLE_AI_API_KEY", "test-google-api-key")
+	t.Setenv("OPENAI_API_KEY", "test-openai-api-key")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	wd, err := os.Getwd()
+	require.NoError(t, err)
+
+	var elicitationCalls atomic.Int32
+	client := sdkmcp.NewClient(
+		&sdkmcp.Implementation{Name: "mcp-tts-integration-test", Version: "1.0.0"},
+		&sdkmcp.ClientOptions{
+			ElicitationHandler: func(
+				_ context.Context,
+				req *sdkmcp.ElicitRequest,
+			) (*sdkmcp.ElicitResult, error) {
+				switch elicitationCalls.Add(1) {
+				case 1:
+					if req.Params.Message != "Which TTS provider would you like to use?" {
+						return nil, fmt.Errorf("unexpected provider elicitation message %q", req.Params.Message)
+					}
+					return &sdkmcp.ElicitResult{
+						Action:  "accept",
+						Content: map[string]any{"provider": "OpenAI"},
+					}, nil
+				case 2:
+					if req.Params.Message != "Configure voice settings (or accept defaults):" {
+						return nil, fmt.Errorf("unexpected settings elicitation message %q", req.Params.Message)
+					}
+					return &sdkmcp.ElicitResult{
+						Action:  "accept",
+						Content: map[string]any{},
+					}, nil
+				case 3:
+					if req.Params.Message != "Configure OpenAI TTS settings (or accept defaults):" {
+						return nil, fmt.Errorf("unexpected OpenAI elicitation message %q", req.Params.Message)
+					}
+					return &sdkmcp.ElicitResult{Action: "cancel"}, nil
+				default:
+					return nil, fmt.Errorf("unexpected extra elicitation request")
+				}
+			},
+		},
+	)
+
+	command := exec.CommandContext(ctx, "go", "run", filepath.Join(wd, "main.go"), "--elicit")
+	command.Stderr = os.Stderr
+	session, err := client.Connect(ctx, &sdkmcp.CommandTransport{Command: command}, nil)
+	require.NoError(t, err)
+	defer session.Close()
+
+	initializeResult := session.InitializeResult()
+	require.NotNil(t, initializeResult)
+	assert.Equal(t, "2026-07-28", initializeResult.ProtocolVersion)
+
+	result, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      "tts",
+		Arguments: map[string]any{"text": "Hello from the current MCP protocol test."},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.False(t, result.IsError)
+	assert.EqualValues(t, 2, elicitationCalls.Load())
+	require.Len(t, result.Content, 1)
+
+	textContent, ok := result.Content[0].(*sdkmcp.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "User selected OpenAI. Please call openai_tts with arguments:")
+	assert.Contains(t, textContent.Text, `"text":"Hello from the current MCP protocol test."`)
+	assert.Contains(t, textContent.Text, `"voice":"alloy"`)
+
+	cancelledResult, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      "openai_tts",
+		Arguments: map[string]any{"text": "Cancel before calling the provider."},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, cancelledResult)
+	assert.False(t, cancelledResult.IsError)
+	assert.EqualValues(t, 3, elicitationCalls.Load())
+	require.Len(t, cancelledResult.Content, 1)
+
+	cancelledText, ok := cancelledResult.Content[0].(*sdkmcp.TextContent)
+	require.True(t, ok)
+	assert.Equal(t, "Request cancelled", cancelledText.Text)
 }
 
 func TestMCPIntegration_TTSInteractiveCancellationJSONL(t *testing.T) {
