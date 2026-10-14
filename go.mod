@@ -1,18 +1,18 @@
 module github.com/blacktop/mcp-tts
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/caarlos0/ctrlc v1.2.0
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/log v1.0.0
 	github.com/gopxl/beep/v2 v2.1.1
-	github.com/modelcontextprotocol/go-sdk v1.7.0
+	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/openai/openai-go v1.12.0
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
-	golang.org/x/sys v0.47.0
-	google.golang.org/genai v1.73.0
+	golang.org/x/sys v0.49.0
+	google.golang.org/genai v1.74.0
 )
 
 require (
