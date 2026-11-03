@@ -5,9 +5,9 @@ Read this file only when selecting non-default tool parameters, applying fallbac
 ## Selection policy
 
 1. Use tools already exposed by the connected `mcp-tts` server. Do not shell-probe binaries or credentials.
-2. Default to local-only speech. When either local tool is exposed, call it directly instead of the interactive `tts` dispatcher.
-3. Use `say_tts` for time-sensitive intervention alerts.
-4. Use `voice_tts` for plans, summaries, and non-urgent announcements when registered.
+2. Default to local-only speech. When both local tools are exposed, alternate successful announcements within the session so `voice_tts` and `say_tts` are used roughly equally. Start with the first local provider in configured order; do not persist rotation counters.
+3. Use `say_tts` immediately for time-sensitive intervention alerts when needed, then prefer `voice_tts` for the next eligible announcement to restore the balance.
+4. When only one local tool is exposed, use it directly instead of the interactive `tts` dispatcher.
 5. Use cloud speech only after an explicit user choice or an existing user-created configuration. Select exactly one cloud provider; never probe or chain Google, OpenAI, and ElevenLabs.
 6. If the selected cloud provider fails for quota, token, authentication, or configuration reasons, disable automatic cloud TTS for the rest of the session. Use one local fallback if available; otherwise remain text-only. A later explicit user request may select one cloud provider again.
 7. Attempt each selected provider at most once and make at most two TTS calls total for one announcement.
@@ -17,10 +17,12 @@ No provider is guaranteed. Local audio can be unavailable in CI, containers, Lin
 
 ## Provider choice
 
-When `say_tts` or `voice_tts` is available, use the local default without interrupting the user:
+When `say_tts` or `voice_tts` is available, use local speech without interrupting the user:
 
-- Urgent issue or intervention: `say_tts`
-- Plan, checkpoint, or summary: `voice_tts`, then `say_tts` if Voice is not registered
+- Both available with no saved preference: alternate successful announcements roughly 1:1, beginning with the first local provider in `provider_order`
+- Urgent issue or intervention: `say_tts` may run out of turn; choose `voice_tts` next to restore balance
+- Only one available: use that tool
+- Explicit preference: honor it instead of balancing; persist the requested priority unless the user says it is only for this call or session
 
 Ask for a provider choice only when:
 
@@ -35,7 +37,7 @@ When no local tool is available, list only exposed cloud providers and text-only
 
 > "No local speech tool is available. Stay text-only, or use one exposed cloud provider that consumes API quota?"
 
-Default the choice to local when available and text-only otherwise. If no speech tool is exposed, remain text-only without prompting. If the user names a specific provider, that is already an explicit choice and needs no extra prompt. If an existing configuration is ambiguous or names an unavailable provider, use the local default or text-only mode and report the configuration issue non-blockingly instead of prompting. A one-off correction changes only the current session. Update a configuration file only when the user says to remember the choice, make it the default, or directly asks to edit the configuration.
+Default the choice to local when available and text-only otherwise. If no speech tool is exposed, remain text-only without prompting. If the user names a specific provider, that is already an explicit choice and needs no extra prompt. If an existing configuration is ambiguous or names an unavailable provider, use the balanced local default or text-only mode and report the configuration issue non-blockingly instead of prompting. A preference such as “prefer Voice,” “prefer say,” or “use both equally” updates the project configuration while preserving unrelated fields. An explicitly one-off request changes only the current session.
 
 ## Local tools
 
@@ -97,16 +99,17 @@ When a saved cloud choice fails, report in text that the session switched to loc
 
 ## Existing configuration
 
-Read an existing user-created project configuration if present. For cross-agent setups, prefer `.agents/tts-config.json`; accept legacy `.claude/tts-config.json` for compatibility. Never create or modify either file unless the user explicitly asks.
+Read an existing project configuration if present. For cross-agent setups, prefer `.agents/tts-config.json`; accept legacy `.claude/tts-config.json` for compatibility. When the user states a provider preference, update the existing file while preserving unrelated fields, or create `.agents/tts-config.json` when neither file exists. Do not persist an explicitly one-off request.
 
 Recognized concepts:
 
 - `speaker`: short spoken project or agent label
 - `provider_order`: explicit order, normally `["voice_tts", "say_tts"]`
+- `local_strategy`: `balanced` (default) or `priority`
 - `unavailable_providers`: providers the user has chosen to suppress
 - `voices`: optional per-message voice choices
 
-Accept legacy short names (`voice`, `say`, `google`, `openai`, `elevenlabs`) as aliases for their corresponding `_tts` tools. Message urgency still controls which configured local tool runs first. If a legacy configuration lists multiple cloud providers, select only the first eligible cloud provider; after any cloud failure, skip every remaining cloud entry for the rest of the session.
+Accept legacy short names (`voice`, `say`, `google`, `openai`, `elevenlabs`) as aliases for their corresponding `_tts` tools. A missing `local_strategy` means `balanced`; `provider_order` chooses the first turn and breaks ties. Set `local_strategy` to `priority` when the user prefers one local provider, or to `balanced` when the user asks to use both equally. Message urgency may still move `say_tts` forward once. If a legacy configuration lists multiple cloud providers, select only the first eligible cloud provider; after any cloud failure, skip every remaining cloud entry for the rest of the session.
 
 Example local-first configuration:
 
@@ -114,6 +117,7 @@ Example local-first configuration:
 {
   "speaker": "mcp-tts",
   "provider_order": ["voice_tts", "say_tts"],
+  "local_strategy": "balanced",
   "unavailable_providers": []
 }
 ```

@@ -388,6 +388,46 @@ func TestGUISayPlaySaveThenAfplaySequence(t *testing.T) {
 	}
 }
 
+func TestRexGUISayStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		savedPath string
+		play      bool
+		startErr  error
+	}{
+		{name: "save-only", savedPath: "/tmp/out.aiff"},
+		{name: "save-and-play", savedPath: "/tmp/out.aiff", play: true},
+		{name: "launch-failure", play: true, startErr: errors.New("bootstrap failed")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			ctx := rexTestContext(&out)
+			fakeGUIJobs(t, tc.startErr, nil, nil)
+			start := startGUIJobFn
+			startGUIJobFn = func(ctx context.Context, program string, args []string) (guiJobHandle, error) {
+				if tc.savedPath != "" && program == sayBinPath && out.Len() != 0 {
+					t.Error("synthesizing a saved file must not show a speaking indicator")
+				}
+				return start(ctx, program, args)
+			}
+			err := guiSayPlay(ctx, nil, "hello", tc.savedPath, tc.play)
+			if !errors.Is(err, tc.startErr) {
+				t.Fatalf("guiSayPlay() error = %v, want %v", err, tc.startErr)
+			}
+			reports := rexTestReports(t, out.String())
+			if !tc.play {
+				if len(reports) != 0 {
+					t.Fatalf("save-only emitted status: %v", reports)
+				}
+				return
+			}
+			if len(reports) != 2 || reports[0]["state"] != "working" || reports[1]["state"] != "clear" || reports[0]["id"] != reports[1]["id"] {
+				t.Fatalf("speech status did not clear: %v", reports)
+			}
+		})
+	}
+}
+
 func TestGUIRoutedSayProducesRealAudio(t *testing.T) {
 	if os.Getenv("GITHUB_ACTIONS") != "" {
 		t.Skip("no GUI session in CI")

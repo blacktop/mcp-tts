@@ -136,6 +136,8 @@ func callVoiceTTS(ctx context.Context, binaryPath string, input VoiceTTSParams) 
 		return errorResult(fmt.Sprintf("Error: Failed to acquire TTS lock: %v", err))
 	}
 	defer release()
+	stopSpeaking := beginRexSpeaking(ctx)
+	defer stopSpeaking()
 
 	log.Debug("Voice TTS tool called", "path", binaryPath, "args", args)
 	if err := voiceSayRunner(ctx, binaryPath, args, input.Text); err != nil {

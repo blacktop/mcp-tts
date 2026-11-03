@@ -383,17 +383,25 @@ func startGUISay(
 	}
 	sayArgs = append(sayArgs, "-f", txtPath)
 
+	stopSpeaking := func() {}
+	if savedPath == "" && play {
+		stopSpeaking = beginRexSpeaking(ctx)
+	}
 	handle, err := startGUIJobFn(ctx, sayBinPath, sayArgs)
 	if err != nil {
+		stopSpeaking()
 		removeTxt()
 		return nil, nil, err
 	}
 
 	wait = func(waitCtx context.Context) error {
+		defer stopSpeaking()
 		if err := waitGUIJobFn(waitCtx, handle); err != nil {
 			return err
 		}
 		if savedPath != "" && play {
+			stopSavedSpeech := beginRexSpeaking(waitCtx)
+			defer stopSavedSpeech()
 			return runInGUISession(waitCtx, afplayBinPath, []string{savedPath})
 		}
 		return nil
@@ -474,8 +482,10 @@ func playViaGUI(label, ext string, audioData []byte) error {
 		cleanup()
 		return fmt.Errorf("failed to acquire TTS lock: %w", err)
 	}
+	stopSpeaking := beginRexSpeaking(serverCtx)
 	handle, err := startGUIJobFn(serverCtx, afplayBinPath, []string{path})
 	if err != nil {
+		stopSpeaking()
 		release()
 		cleanup()
 		return fmt.Errorf("starting GUI playback for %s: %w", label, err)
@@ -483,6 +493,7 @@ func playViaGUI(label, ext string, audioData []byte) error {
 	playbackWG.Go(func() {
 		defer release()
 		defer cleanup()
+		defer stopSpeaking()
 		if e := waitGUIJobFn(serverCtx, handle); e != nil && serverCtx.Err() == nil {
 			log.Error("GUI-routed playback failed", "label", label, "error", e)
 		}

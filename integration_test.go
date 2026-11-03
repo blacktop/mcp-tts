@@ -453,9 +453,15 @@ func (r *MCPTestRunner) Close() {
 }
 
 // Helper functions
-func stringPtr(s string) *string    { return &s }
-func intPtr(i int) *int             { return &i }
-func float64Ptr(f float64) *float64 { return &f }
+//
+//go:fix inline
+func stringPtr(s string) *string { return new(s) }
+
+//go:fix inline
+func intPtr(i int) *int { return new(i) }
+
+//go:fix inline
+func float64Ptr(f float64) *float64 { return new(f) }
 
 // requireSpeakingOrSkip asserts the tool reported speaking, but skips the test
 // when the provider returned an error result (e.g. a live API quota/429 or an
@@ -883,7 +889,7 @@ func TestMCPIntegration_SayTTS(t *testing.T) {
 
 	args := SayTTSArgs{
 		Text: "Hello! This is a test of the macOS say command.",
-		Rate: intPtr(200),
+		Rate: new(200),
 		// Don't specify voice - use system default to avoid "voice not installed" errors
 	}
 
@@ -964,8 +970,8 @@ func TestMCPIntegration_GoogleTTS(t *testing.T) {
 
 	args := GoogleTTSArgs{
 		Text:  "Hello! This is a test of Google's TTS API.",
-		Voice: stringPtr("Kore"),
-		Model: stringPtr("gemini-3.1-flash-tts-preview"),
+		Voice: new("Kore"),
+		Model: new("gemini-3.1-flash-tts-preview"),
 	}
 
 	response, err := runner.callTool(5, "google_tts", args)
@@ -1006,9 +1012,9 @@ func TestMCPIntegration_OpenAITTS(t *testing.T) {
 
 	args := OpenAITTSArgs{
 		Text:  "Hello! This is a test of OpenAI's text-to-speech API.",
-		Voice: stringPtr("coral"),
-		Speed: float64Ptr(1.2),
-		Model: stringPtr("gpt-4o-mini-tts-2025-12-15"),
+		Voice: new("coral"),
+		Speed: new(1.2),
+		Model: new("gpt-4o-mini-tts-2025-12-15"),
 	}
 
 	response, err := runner.callTool(6, "openai_tts", args)

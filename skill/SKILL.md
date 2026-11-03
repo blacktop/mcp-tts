@@ -1,6 +1,6 @@
 ---
 name: speak
-description: "Provides concise spoken alerts and digests through the mcp-tts MCP server. It should be selected proactively for significant AI and DevOps transitions: a substantial plan is ready, a long build/test/deploy/release/monitoring phase changes state, a major task completes, a terminal blocker or exhausted retry budget needs attention, user approval/authentication/manual action is required, or a lengthy final result needs a short audible summary. Do not use for routine progress or ordinary short replies."
+description: "Speaks a short digest through the mcp-tts MCP server whenever the user would otherwise have to be watching the screen to know something happened. Select it while composing the reply in two cases: you are writing a summary at a stopping point (a substantial task finished, a plan is ready, a long build/test/deploy/research phase changed state, a lengthy final result needs an audible digest), or you need the user (a question, a decision, approval, authentication, a manual action, a terminal blocker, an exhausted retry budget). Nothing announces on the agent's behalf, so an unspoken summary is a silent one. Do not use for routine progress, short answers, or intermediate steps."
 ---
 
 # Speak
@@ -15,6 +15,22 @@ Use speech as an attention channel for meaningful agent transitions. Keep the co
 - Respect quiet requests. Stay silent in CI, headless sessions, non-interactive automation, or when no audio tool is available.
 - Deduplicate announcements. Speak once per meaningful transition, blocker, or request for help.
 - Make no persistent configuration changes unless the user explicitly asks.
+
+## When to reach for this
+
+Nothing announces on your behalf. No hook watches for finished turns or reads
+your summary; if you do not elect to speak, the user hears nothing. Make that
+election while you are composing the reply, not after sending it.
+
+Two moments carry the obligation:
+
+- **You are writing a summary at a stopping point.** A substantial task is done
+  and you are handing back a wrap-up meant to be read. Speak a digest of it.
+- **You need something from the user.** You are asking a question, presenting a
+  decision, or blocked pending approval or manual action. Speak the ask.
+
+Everything else stays silent. A short answer, a routine edit, a passing test, or
+an intermediate step is not a stopping point.
 
 ## Decide whether to speak
 
@@ -91,24 +107,30 @@ Transform text for speech:
 
 Use only tools present in the current MCP tool catalog. Do not probe `PATH`, credentials, environment variables, or shell startup files.
 
-- **Local-only default:** when `say_tts` or `voice_tts` is exposed, use those tools directly. Do not call the interactive `tts` dispatcher or try cloud providers speculatively.
-- **Urgent intervention:** prefer `say_tts` because it starts quickly. If it is unavailable, keep the textual request and do not delay it by cycling through slow providers.
-- **Plans, long-running checkpoints, and summaries:** prefer `voice_tts` when it is registered; it is local and expressive but has several seconds of model startup. Otherwise use `say_tts`.
+- **Balanced local default:** when both `say_tts` and `voice_tts` are exposed, alternate successful announcements within the session so each is used roughly equally. Start with the first local provider in the configured order and keep the rotation session-local.
+- **Urgent intervention:** `say_tts` may go first because it starts quickly. Prefer `voice_tts` for the next eligible announcement to restore the balance.
+- **Single local tool:** when only one local tool is exposed, use it directly. Do not call the interactive `tts` dispatcher or try cloud providers speculatively.
 - **Cloud providers:** use only the one provider explicitly selected by the user or an existing user-created configuration, and never for sensitive material. Do not fan out across cloud providers.
 - **Cloud failure:** on quota, token, authentication, or configuration failure, disable automatic cloud TTS for the rest of the session and use a local tool if available; otherwise remain text-only. A later explicit user request may select one cloud provider again.
 
-Do not ask the user to choose a provider merely because several tools are exposed—the privacy-preserving, zero-API-token local behavior is the default. Ask once only when the user requests a cloud voice without naming a provider, or when no local tool is available, at least one cloud tool is exposed, and spoken output is still desired. Treat a one-off correction as a session choice; persist it only when the user asks to remember or make it the default.
+Do not ask the user to choose a provider merely because several tools are exposed—the privacy-preserving, zero-API-token balanced local behavior is the default. Ask once only when the user requests a cloud voice without naming a provider, or when no local tool is available, at least one cloud tool is exposed, and spoken output is still desired. When the user states a provider preference or priority order, update the project configuration while preserving unrelated fields. Keep an explicitly one-off request session-local.
 
 Treat the live MCP input schema as authoritative. Read [references/providers.md](references/providers.md) before selecting non-default parameters, applying fallback behavior, or honoring an existing provider configuration.
 
 For optional per-project voice identity explicitly requested by the user, also read [references/voice-pools.json](references/voice-pools.json).
+
+## Rex speaking indicator
+
+Builds of mcp-tts with Rex support report **🔊 Speaking** automatically through Rex's [program-status protocol](https://www.superlogical.com/rex/docs/build/program-status). Call the TTS tool normally and let the server clear its own status when playback ends. A tool response can arrive while audio is still playing, so do not rename tabs, move focus, or emit or clear terminal status around the call.
+
+If the indicator is missing, the MCP server needs the updated binary, inherited `REX_SESSION` and `REX_BLOCK`, and its controlling terminal. Rex's **Settings → Notifications → Program Activity → Show activity in tabs** must also be enabled. A detached or shared server without the caller's terminal cannot safely identify the speaking pane; keep the spoken source label and do not guess a tab. Use the Rex skill for further diagnosis when requested.
 
 ## Workflow
 
 1. Classify the event as silent, notify, or intervene.
 2. Write the required user-facing status, result, or question in the normal channel.
 3. Create a 20–50 word speech-safe digest with the source label.
-4. Select an available local tool based on urgency; use cloud only by explicit prior choice.
+4. Select the next available local tool using the configured preference or balanced rotation; use cloud only by explicit prior choice.
 5. Attempt speech within the bounded fallback policy, then continue or stop according to the main task—not according to TTS success.
 
 ## Examples

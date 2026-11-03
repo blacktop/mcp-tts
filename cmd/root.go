@@ -160,6 +160,8 @@ func playInBackground(label string, play func(ctx context.Context)) error {
 
 	playbackWG.Go(func() {
 		defer release()
+		stopSpeaking := beginRexSpeaking(serverCtx)
+		defer stopSpeaking()
 		log.Debug("Starting background playback", "label", label)
 		play(serverCtx)
 	})
@@ -172,15 +174,21 @@ func startSayPlayback(playArgs []string, savedPath, text string) error {
 		return fmt.Errorf("failed to acquire TTS lock: %w", err)
 	}
 
+	stopSpeaking := func() {}
+	if savedPath == "" {
+		stopSpeaking = beginRexSpeaking(serverCtx)
+	}
 	cmd := exec.CommandContext(serverCtx, "/usr/bin/say", playArgs...)
 	log.Debug("Starting say command", "args", playArgs)
 	if err := cmd.Start(); err != nil {
+		stopSpeaking()
 		release()
 		return fmt.Errorf("failed to start say command: %w", err)
 	}
 
 	playbackWG.Go(func() {
 		defer release()
+		defer stopSpeaking()
 		if err := cmd.Wait(); err != nil {
 			if serverCtx.Err() == nil {
 				log.Error("Say command failed", "error", err)
@@ -189,6 +197,8 @@ func startSayPlayback(playArgs []string, savedPath, text string) error {
 		}
 		// say -o wrote the file without playing; play it now.
 		if savedPath != "" {
+			stopSavedSpeech := beginRexSpeaking(serverCtx)
+			defer stopSavedSpeech()
 			log.Debug("Playing saved AIFF file", "path", savedPath)
 			if err := exec.CommandContext(serverCtx, "afplay", savedPath).Run(); err != nil && serverCtx.Err() == nil {
 				log.Warn("Failed to play saved audio", "error", err)
@@ -458,6 +468,9 @@ Designed to be used with the MCP (Model Context Protocol).`,
 		var serverCancel context.CancelFunc
 		serverCtx, serverCancel = context.WithCancel(context.Background())
 		defer serverCancel()
+		var closeRexStatus func()
+		serverCtx, closeRexStatus = withRexStatus(serverCtx)
+		defer closeRexStatus()
 
 		// Bury GUI audio jobs left behind by crashed mcp-tts processes before we
 		// start routing new ones. No-op outside a routable Background session.

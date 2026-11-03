@@ -26,16 +26,20 @@ type TestCallToolResult struct {
 }
 
 // Helper functions for creating pointers to basic types
+//
+//go:fix inline
 func stringPtr(s string) *string {
-	return &s
+	return new(s)
 }
 
+//go:fix inline
 func intPtr(i int) *int {
-	return &i
+	return new(i)
 }
 
+//go:fix inline
 func float64Ptr(f float64) *float64 {
-	return &f
+	return new(f)
 }
 
 // MockAudioPlayer simulates audio playback for testing
@@ -76,7 +80,7 @@ func TestSayTTSTool(t *testing.T) {
 			name: "with custom rate",
 			params: SayTTSParams{
 				Text: "Testing custom rate",
-				Rate: intPtr(250),
+				Rate: new(250),
 			},
 			expectError:   false,
 			shouldContain: []string{"Speaking:", "Testing custom rate"},
@@ -85,7 +89,7 @@ func TestSayTTSTool(t *testing.T) {
 			name: "with custom voice",
 			params: SayTTSParams{
 				Text:  "Testing custom voice",
-				Voice: stringPtr("Alex"),
+				Voice: new("Alex"),
 			},
 			expectError:   false,
 			shouldContain: []string{"Speaking:", "Testing custom voice"},
@@ -94,7 +98,7 @@ func TestSayTTSTool(t *testing.T) {
 			name: "with voice containing parentheses",
 			params: SayTTSParams{
 				Text:  "Testing voice with parentheses",
-				Voice: stringPtr("Daniel (English (UK))"),
+				Voice: new("Daniel (English (UK))"),
 			},
 			expectError:   false,
 			shouldContain: []string{"Speaking:", "Testing voice with parentheses"},
@@ -103,7 +107,7 @@ func TestSayTTSTool(t *testing.T) {
 			name: "with voice containing underscore",
 			params: SayTTSParams{
 				Text:  "Testing voice with underscore",
-				Voice: stringPtr("en_US"),
+				Voice: new("en_US"),
 			},
 			expectError:   false,
 			shouldContain: []string{"Speaking:", "Testing voice with underscore"},
@@ -112,7 +116,7 @@ func TestSayTTSTool(t *testing.T) {
 			name: "with voice containing hyphen",
 			params: SayTTSParams{
 				Text:  "Testing voice with hyphen",
-				Voice: stringPtr("Eddy (English (UK))"),
+				Voice: new("Eddy (English (UK))"),
 			},
 			expectError:   false,
 			shouldContain: []string{"Speaking:", "Testing voice with hyphen"},
@@ -165,7 +169,7 @@ func TestSayCommandArgsLeavesVoiceUnset(t *testing.T) {
 		voice *string
 	}{
 		{name: "default nil voice"},
-		{name: "empty voice", voice: stringPtr("")},
+		{name: "empty voice", voice: new("")},
 	}
 
 	for _, tt := range tests {
@@ -272,7 +276,7 @@ func TestElevenLabsJSONOmitsZeroOptionalFields(t *testing.T) {
 func TestSayCommandArgsRejectsInvalidVoiceCharacters(t *testing.T) {
 	args, result := sayCommandArgs(SayTTSParams{
 		Text:  "hello",
-		Voice: stringPtr("Alex; touch /tmp/nope"),
+		Voice: new("Alex; touch /tmp/nope"),
 	})
 
 	assert.Nil(t, args)
@@ -286,7 +290,7 @@ func TestSayCommandArgsRejectsNotInstalledVoice(t *testing.T) {
 
 	args, result := sayCommandArgs(SayTTSParams{
 		Text:  "hello",
-		Voice: stringPtr("NonExistentVoice12345"),
+		Voice: new("NonExistentVoice12345"),
 	})
 
 	assert.Nil(t, args)
@@ -331,8 +335,8 @@ func TestGoogleTTSTool(t *testing.T) {
 			},
 			params: GoogleTTSParams{
 				Text:  "Hello, speak with Puck voice",
-				Voice: stringPtr("Puck"),
-				Model: stringPtr("gemini-2.5-pro-preview-tts"),
+				Voice: new("Puck"),
+				Model: new("gemini-2.5-pro-preview-tts"),
 			},
 			expectError:   false,
 			shouldContain: []string{"Google TTS", "voice Puck", "gemini-2.5-pro-preview-tts"},
@@ -439,9 +443,9 @@ func TestOpenAITTSTool(t *testing.T) {
 			},
 			params: OpenAITTSParams{
 				Text:  "Hello, speak with echo voice",
-				Voice: stringPtr("echo"),
-				Model: stringPtr("gpt-4o-audio-preview"),
-				Speed: float64Ptr(1.5),
+				Voice: new("echo"),
+				Model: new("gpt-4o-audio-preview"),
+				Speed: new(1.5),
 			},
 			expectError:   false,
 			shouldContain: []string{"OpenAI TTS", "voice echo"},
@@ -475,7 +479,7 @@ func TestOpenAITTSTool(t *testing.T) {
 			},
 			params: OpenAITTSParams{
 				Text:  "Speed test",
-				Speed: float64Ptr(0.1), // Too slow
+				Speed: new(0.1), // Too slow
 			},
 			expectError:   false, // Should use default speed
 			shouldContain: []string{"OpenAI TTS", "voice coral"},
@@ -487,7 +491,7 @@ func TestOpenAITTSTool(t *testing.T) {
 			},
 			params: OpenAITTSParams{
 				Text:         "Test with custom instructions",
-				Instructions: stringPtr("Speak in a cheerful and positive tone"),
+				Instructions: new("Speak in a cheerful and positive tone"),
 			},
 			expectError:   false,
 			shouldContain: []string{"OpenAI TTS", "voice coral"},
@@ -614,8 +618,8 @@ func TestParameterValidation(t *testing.T) {
 			valid  bool
 		}{
 			{"valid basic", SayTTSParams{Text: "Hello"}, true},
-			{"valid with rate", SayTTSParams{Text: "Hello", Rate: intPtr(200)}, true},
-			{"valid with voice", SayTTSParams{Text: "Hello", Voice: stringPtr("Alex")}, true},
+			{"valid with rate", SayTTSParams{Text: "Hello", Rate: new(200)}, true},
+			{"valid with voice", SayTTSParams{Text: "Hello", Voice: new("Alex")}, true},
 			{"empty text", SayTTSParams{Text: ""}, false},
 		}
 
@@ -634,11 +638,11 @@ func TestParameterValidation(t *testing.T) {
 			valid bool
 		}{
 			{"nil speed", nil, true},
-			{"valid speed", float64Ptr(1.0), true},
-			{"minimum speed", float64Ptr(0.25), true},
-			{"maximum speed", float64Ptr(4.0), true},
-			{"too slow", float64Ptr(0.1), false},
-			{"too fast", float64Ptr(5.0), false},
+			{"valid speed", new(1.0), true},
+			{"minimum speed", new(0.25), true},
+			{"maximum speed", new(4.0), true},
+			{"too slow", new(0.1), false},
+			{"too fast", new(5.0), false},
 		}
 
 		for _, tt := range tests {
@@ -799,8 +803,8 @@ func isDarwin() bool {
 func BenchmarkParameterValidation(b *testing.B) {
 	params := SayTTSParams{
 		Text:  "Benchmark test message",
-		Rate:  intPtr(200),
-		Voice: stringPtr("Alex"),
+		Rate:  new(200),
+		Voice: new("Alex"),
 	}
 
 	b.ResetTimer()

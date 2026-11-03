@@ -84,6 +84,12 @@ Additional features:
 
 ## Configuration
 
+### Rex speaking indicator
+
+When an agent starts mcp-tts inside a [Rex](https://www.superlogical.com/rex/docs/) terminal, playback reports **🔊 Speaking** using Rex's [program-status protocol](https://www.superlogical.com/rex/docs/build/program-status). Enable **Settings → Notifications → Program Activity → Show activity in tabs** to see the indicator and use Rex's Activity view to find the speaking pane. Each playback clears its own record when it finishes, including failures and cancellation. Voice's indicator also covers model startup because `voice-say` handles synthesis and playback together.
+
+The MCP server must inherit `REX_SESSION`, `REX_BLOCK`, and its controlling terminal. A detached or shared MCP server without that terminal cannot identify the caller's pane, so the indicator is disabled there. Speech still works normally.
+
 ### Sequential vs Concurrent TTS
 
 By default, the TTS server enforces sequential speech operations - only one TTS request can play audio at a time. This prevents multiple agents from speaking simultaneously and creating an unintelligible cacophony. Subsequent requests will wait in a queue until the current speech completes.
@@ -416,7 +422,7 @@ The skill should be selected after:
 - **Long operation changes state** - When a build, test, deployment, release, research, or monitoring phase completes or fails
 - **Human intervention needed** - When approval, authentication, manual action, or an exhausted retry budget blocks progress
 
-The skill defaults to local-only speech without probing credentials: `voice_tts` for plans and summaries when Voice is registered, and fast `say_tts` for urgent alerts or fallback. Both avoid cloud API quotas and keep spoken content on the Mac. Cloud TTS is used only after an explicit user choice or saved configuration. If that cloud provider hits a quota, token, authentication, or configuration failure, automatic cloud TTS is disabled for the session and the skill uses local speech—or remains text-only when no local tool is available. It never tries the other cloud providers automatically. One-off provider corrections last for the session; configuration is updated only when the user asks to remember the choice. For local `say` identity, leave `voice` unset to use the host System Voice unless the user intentionally selected an exact installed voice.
+The skill defaults to local-only speech without probing credentials. When both are registered, it alternates `voice_tts` and `say_tts` roughly equally; urgent alerts may use fast `say_tts` first, with Voice preferred for the next eligible announcement. Both avoid cloud API quotas and keep spoken content on the Mac. A stated user preference overrides balancing and updates the project TTS configuration unless the request is explicitly one-off. Cloud TTS is used only after an explicit user choice or saved configuration. If that cloud provider hits a quota, token, authentication, or configuration failure, automatic cloud TTS is disabled for the session and the skill uses local speech—or remains text-only when no local tool is available. It never tries the other cloud providers automatically. For local `say` identity, leave `voice` unset to use the host System Voice unless the user intentionally selected an exact installed voice.
 
 ## License
 
