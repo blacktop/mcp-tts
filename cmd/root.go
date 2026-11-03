@@ -78,8 +78,9 @@ var (
 	speakerInitErr    error
 	speakerSampleRate beep.SampleRate
 	// Audio saving options
-	outputDir string // Directory to save audio files
-	noPlay    bool   // Skip playback when saving
+	outputDir          string // Directory to save audio files
+	noPlay             bool   // Skip playback when saving
+	rexTabLabelEnabled bool   // Opt in to temporary Rex tab labels
 )
 
 // acquireTTSLock attempts to acquire the TTS mutex with context support.
@@ -411,6 +412,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&elicitEnabled, "elicit", false, "Enable interactive elicitation prompts (env: MCP_TTS_ELICIT)")
 	rootCmd.PersistentFlags().StringVar(&outputDir, "output-dir", "", "Save audio files to directory (env: MCP_TTS_OUTPUT_DIR)")
 	rootCmd.PersistentFlags().BoolVar(&noPlay, "no-play", false, "Skip playback, only save (requires --output-dir)")
+	rootCmd.PersistentFlags().BoolVar(&rexTabLabelEnabled, "rex-tab-label", false, "Temporarily prefix the exact Rex tab label with 🔊 during playback")
 
 	// Check environment variable for suppressing output
 	if os.Getenv("MCP_TTS_SUPPRESS_SPEAKING_OUTPUT") == "true" {
@@ -469,7 +471,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 		serverCtx, serverCancel = context.WithCancel(context.Background())
 		defer serverCancel()
 		var closeRexStatus func()
-		serverCtx, closeRexStatus = withRexStatus(serverCtx)
+		serverCtx, closeRexStatus = withRexStatus(serverCtx, openRexTTY)
 		defer closeRexStatus()
 
 		// Bury GUI audio jobs left behind by crashed mcp-tts processes before we

@@ -15,22 +15,33 @@ import (
 type rexStatusKey struct{}
 
 type rexStatus struct {
-	mu  sync.Mutex
-	out io.Writer
+	mu    sync.Mutex
+	out   io.Writer
+	label *rexLabelClient
 }
 
 // withRexStatus uses the process's own terminal. Writing an OSC to stdout would
 // corrupt MCP, and sending it through `rex send` would type into the agent.
-func withRexStatus(ctx context.Context) (context.Context, func()) {
+func withRexStatus(ctx context.Context, openTTY func() (io.WriteCloser, error)) (context.Context, func()) {
 	if os.Getenv("REX_SESSION") == "" || os.Getenv("REX_BLOCK") == "" {
+		if rexTabLabelEnabled {
+			log.Warn("Rex tab label unavailable: REX_SESSION and REX_BLOCK are required")
+		}
 		return ctx, func() {}
 	}
-	tty, err := openRexTTY()
+	tty, err := openTTY()
 	if err != nil {
 		log.Debug("Rex speech status unavailable", "error", err)
 		return ctx, func() {}
 	}
 	status := &rexStatus{out: tty}
+	if rexTabLabelEnabled {
+		var err error
+		status.label, err = newRexLabelClient(os.Getenv("REX_SERVER"), os.Getenv("REX_SESSION"), os.Getenv("REX_BLOCK"))
+		if err != nil {
+			log.Warn("Rex tab label unavailable", "error", err)
+		}
+	}
 	return context.WithValue(ctx, rexStatusKey{}, status), func() {
 		status.mu.Lock()
 		defer status.mu.Unlock()
@@ -60,7 +71,14 @@ func beginRexSpeaking(ctx context.Context) func() {
 		return func() {}
 	}
 	id := "mcp-tts/" + rand.Text()
+	restoreLabel := func() {}
+	if status.label != nil {
+		restoreLabel = beginRexTabLabel(ctx, status.label, id)
+	}
 	text := base64.StdEncoding.EncodeToString([]byte("🔊 Speaking"))
 	status.write(fmt.Sprintf("state=working:id=%s:app=mcp-tts:title=%s:msg=%s", id, text, text))
-	return func() { status.write("state=clear:id=" + id) }
+	return func() {
+		status.write("state=clear:id=" + id)
+		restoreLabel()
+	}
 }

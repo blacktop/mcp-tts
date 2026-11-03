@@ -86,9 +86,17 @@ Additional features:
 
 ### Rex speaking indicator
 
-When an agent starts mcp-tts inside a [Rex](https://www.superlogical.com/rex/docs/) terminal, playback reports **🔊 Speaking** using Rex's [program-status protocol](https://www.superlogical.com/rex/docs/build/program-status). Enable **Settings → Notifications → Program Activity → Show activity in tabs** to see the indicator and use Rex's Activity view to find the speaking pane. Each playback clears its own record when it finishes, including failures and cancellation. Voice's indicator also covers model startup because `voice-say` handles synthesis and playback together.
+When an agent starts mcp-tts inside a [Rex](https://www.superlogical.com/rex/docs/) terminal, playback reports an independent working record titled **🔊 Speaking** using Rex's [program-status protocol](https://www.superlogical.com/rex/docs/build/program-status). Each playback clears its own record when it finishes, including failures and cancellation. Voice's record also covers model startup because `voice-say` handles synthesis and playback together.
 
-The MCP server must inherit `REX_SESSION`, `REX_BLOCK`, and its controlling terminal. A detached or shared MCP server without that terminal cannot identify the caller's pane, so the indicator is disabled there. Speech still works normally.
+Rex controls how records appear. Its documented tab behavior is a generic working indication on unfocused tabs; a second working record may be indistinguishable from Codex's existing activity. Receiving the record does not guarantee a separate Speaking label or speaker icon. Check the unfocused tab and Activity view in the installed Rex client before relying on either presentation.
+
+For a visible tab-label marker, opt in with `mcp-tts --rex-tab-label`. This requires the `rex` CLI, a local Unix Rex server, and full inherited Rex session/block IDs. The server resolves the pane's exact window, temporarily prefixes its label with **🔊**, and restores the original after the last overlapping playback. Other mcp-tts processes and panes sharing that tab coordinate through private, per-user files in `/tmp`. Long labels are shortened only while marked. A detected manual rename relinquishes ownership until the overlapping playback finishes.
+
+The existing independent OSC records remain enabled by default. A process crash or failed cleanup can leave the marker until the next opted-in playback in that tab; that playback recovers abandoned leases and preserves the saved original label. If the saved state is lost or corrupt, correct the label manually. Rex has no compare-and-set operation, so a manual rename made between the integration's final label read and write can still be overwritten.
+
+The MCP server must inherit `REX_SESSION`, `REX_BLOCK`, and its controlling terminal. A detached or shared MCP server without that terminal cannot identify the caller's pane, so status reporting is disabled there. Speech still works normally.
+
+For Codex, append `"REX_SESSION"`, `"REX_BLOCK"`, and `"REX_SERVER"` to the existing `env_vars` list under your `[mcp_servers.<name>]` entry in `config.toml`. Keep any provider variables already listed there. Launch Codex with `--no-daemon` inside Rex so its MCP child retains that terminal, then restart the MCP connection after changing the configuration. Rexurrect's Codex launcher already supplies `--no-daemon`.
 
 ### Sequential vs Concurrent TTS
 
@@ -185,6 +193,7 @@ Flags:
   -h, --help                       help for mcp-tts
       --no-play                    Skip playback, only save (requires --output-dir)
       --output-dir string          Save audio files to directory (env: MCP_TTS_OUTPUT_DIR)
+      --rex-tab-label              Temporarily prefix the exact Rex tab label with 🔊 during playback
       --sequential-tts             Enforce sequential TTS (prevent concurrent speech) (default true)
       --suppress-speaking-output   Suppress 'Speaking:' text output
   -v, --verbose                    Enable verbose debug logging

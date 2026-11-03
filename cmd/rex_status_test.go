@@ -59,6 +59,32 @@ func TestRexSpeakingRecordsAreIndependent(t *testing.T) {
 	require.Equal(t, map[string]string{"state": "clear", "id": reports[1]["id"]}, reports[3])
 }
 
+func TestRexTabLabelRequiresControllingTerminal(t *testing.T) {
+	t.Setenv("REX_SERVER", "unix:///tmp/rex-test.sock")
+	t.Setenv("REX_SESSION", "session:11111111-1111-1111-1111-111111111111")
+	t.Setenv("REX_BLOCK", "block:33333333-3333-3333-3333-333333333333")
+	previousEnabled, previousCtx, previousSequential := rexTabLabelEnabled, serverCtx, sequentialTTS
+	rexTabLabelEnabled, sequentialTTS = true, false
+	t.Cleanup(func() {
+		playbackWG.Wait()
+		rexTabLabelEnabled, serverCtx, sequentialTTS = previousEnabled, previousCtx, previousSequential
+	})
+	ctx, closeStatus := withRexStatus(context.Background(), func() (io.WriteCloser, error) {
+		return nil, errors.New("no controlling terminal")
+	})
+	defer closeStatus()
+	require.Nil(t, ctx.Value(rexStatusKey{}), "inherited IDs alone must not enable status or tab relabeling")
+	serverCtx = ctx
+	played := make(chan struct{}, 1)
+	require.NoError(t, playInBackground("no-tty-test", func(context.Context) { played <- struct{}{} }))
+	playbackWG.Wait()
+	select {
+	case <-played:
+	default:
+		t.Fatal("missing controlling terminal prevented playback")
+	}
+}
+
 func TestRexSpeakingFollowsDetachedPlayback(t *testing.T) {
 	var out bytes.Buffer
 	ctx, cancel := context.WithCancel(rexTestContext(&out))

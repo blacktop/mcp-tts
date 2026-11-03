@@ -121,9 +121,13 @@ For optional per-project voice identity explicitly requested by the user, also r
 
 ## Rex speaking indicator
 
-Builds of mcp-tts with Rex support report **🔊 Speaking** automatically through Rex's [program-status protocol](https://www.superlogical.com/rex/docs/build/program-status). Call the TTS tool normally and let the server clear its own status when playback ends. A tool response can arrive while audio is still playing, so do not rename tabs, move focus, or emit or clear terminal status around the call.
+Builds of mcp-tts with Rex support report an independent working record titled **🔊 Speaking** through Rex's [program-status protocol](https://www.superlogical.com/rex/docs/build/program-status). Rex controls that record's presentation; alongside Codex's working record, it may produce no distinct tab label. For an explicitly requested visible marker, start mcp-tts with `--rex-tab-label`. The server then owns a temporary **🔊** prefix on the exact tab and restores the label after overlapping speech ends. This option requires a local Unix Rex server. Call TTS normally and leave both label and record cleanup to mcp-tts: a tool response can arrive before playback ends. Do not add your own per-call rename, move focus, overwrite another program's record, or report a false blocked/done state to attract attention.
 
-If the indicator is missing, the MCP server needs the updated binary, inherited `REX_SESSION` and `REX_BLOCK`, and its controlling terminal. Rex's **Settings → Notifications → Program Activity → Show activity in tabs** must also be enabled. A detached or shared server without the caller's terminal cannot safely identify the speaking pane; keep the spoken source label and do not guess a tab. Use the Rex skill for further diagnosis when requested.
+A detected manual rename is preserved. Abrupt process termination can leave a marker until the next opted-in playback recovers its abandoned lease. Rex's label API has no compare-and-set, so a manual rename can still race the final read/write. Verify the actual label or GUI before claiming visible success; native status-record receipt alone is insufficient.
+
+If no mcp-tts record arrives, check that the MCP server has the updated binary, inherited `REX_SESSION` and `REX_BLOCK`, and its controlling terminal. Visible activity is controlled by Rex's **Settings → Notifications → Program Activity → Show activity in tabs**. A detached or shared server without the caller's terminal cannot safely identify the speaking pane; keep the spoken source label and do not guess a tab. Use the Rex skill for further diagnosis when requested.
+
+Codex filters the environment of stdio MCP servers. Its mcp-tts entry must include `REX_SESSION`, `REX_BLOCK`, and `REX_SERVER` in `env_vars`, preserving any existing provider entries. Terminal Codex must use `--no-daemon` so the MCP child retains the caller's terminal; Rexurrect's Codex launcher already does this. Restart the MCP connection after changing its launch configuration. Store variable names, never session-specific IDs.
 
 ## Workflow
 
