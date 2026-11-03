@@ -1,6 +1,6 @@
 module github.com/blacktop/mcp-tts
 
-go 1.26.0
+go 1.27
 
 require (
 	github.com/caarlos0/ctrlc v1.2.0
