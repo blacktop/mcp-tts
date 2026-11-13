@@ -103,10 +103,10 @@ func TestProviderRecommendationArgs(t *testing.T) {
 
 		googleArgs := providerRecommendationArgs(ProviderGoogle, "hello", map[string]any{
 			"voice": "Puck",
-			"model": "gemini-2.5-pro-preview-tts",
+			"model": "gemini-3.8-flash-lite-tts",
 		})
 		assert.Equal(t, "Puck", googleArgs["voice"])
-		assert.Equal(t, "gemini-2.5-pro-preview-tts", googleArgs["model"])
+		assert.Equal(t, "gemini-3.8-flash-lite-tts", googleArgs["model"])
 
 		openAIArgs := providerRecommendationArgs(ProviderOpenAI, "hello", map[string]any{
 			"voice": "verse",

@@ -100,7 +100,7 @@ All tools support cancellation via MCP `notifications/cancelled` protocol.
   "arguments": {
     "text": "Text to speak",
     "voice": "Kore",
-    "model": "gemini-3.1-flash-tts-preview"
+    "model": "gemini-3.8-flash-tts"
   }
 }
 ```

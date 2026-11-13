@@ -336,10 +336,10 @@ func TestGoogleTTSTool(t *testing.T) {
 			params: GoogleTTSParams{
 				Text:  "Hello, speak with Puck voice",
 				Voice: new("Puck"),
-				Model: new("gemini-2.5-pro-preview-tts"),
+				Model: new("gemini-3.8-flash-lite-tts"),
 			},
 			expectError:   false,
-			shouldContain: []string{"Google TTS", "voice Puck", "gemini-2.5-pro-preview-tts"},
+			shouldContain: []string{"Google TTS", "voice Puck", "gemini-3.8-flash-lite-tts"},
 		},
 		{
 			name: "missing API key",

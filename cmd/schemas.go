@@ -80,7 +80,7 @@ func buildGoogleTTSSchema() json.RawMessage {
 			},
 			"model": map[string]any{
 				"type":        "string",
-				"description": "TTS model to use (default: 'gemini-3.1-flash-tts-preview')",
+				"description": "TTS model to use (default: 'gemini-3.8-flash-tts')",
 				"enum":        GoogleModels,
 			},
 		},

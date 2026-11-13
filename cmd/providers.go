@@ -38,7 +38,7 @@ const (
 const (
 	DefaultSayRate     = 200
 	DefaultGoogleVoice = "Kore"
-	DefaultGoogleModel = "gemini-3.1-flash-tts-preview"
+	DefaultGoogleModel = "gemini-3.8-flash-tts"
 	DefaultOpenAIVoice = "alloy"
 	DefaultOpenAIModel = "gpt-4o-mini-tts-2025-12-15"
 	DefaultOpenAISpeed = 1.0
@@ -62,9 +62,8 @@ var (
 		"Sulafat", "Umbriel", "Vindemiatrix", "Zephyr", "Zubenelgenubi",
 	}
 	GoogleModels = []string{
-		"gemini-3.1-flash-tts-preview",
-		"gemini-2.5-flash-preview-tts",
-		"gemini-2.5-pro-preview-tts",
+		"gemini-3.8-flash-tts",
+		"gemini-3.8-flash-lite-tts",
 		"gemini-2.5-flash-lite-preview-tts",
 	}
 	OpenAIVoices = []string{

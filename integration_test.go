@@ -971,7 +971,7 @@ func TestMCPIntegration_GoogleTTS(t *testing.T) {
 	args := GoogleTTSArgs{
 		Text:  "Hello! This is a test of Google's TTS API.",
 		Voice: new("Kore"),
-		Model: new("gemini-3.1-flash-tts-preview"),
+		Model: new("gemini-3.8-flash-tts"),
 	}
 
 	response, err := runner.callTool(5, "google_tts", args)
