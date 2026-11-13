@@ -26,9 +26,11 @@ const labelBlockA = "block:33333333-3333-3333-3333-333333333333"
 const labelBlockB = "block:44444444-4444-4444-4444-444444444444"
 
 type labelTestAPI struct {
-	label    string
-	renames  []string
-	failNext bool
+	label      string
+	renames    []string
+	failNext   bool
+	titles     map[string]string
+	titleReads []string
 }
 
 func (a *labelTestAPI) request(ctx context.Context, method string, args, result any) error {
@@ -52,11 +54,25 @@ func (a *labelTestAPI) request(ctx context.Context, method string, args, result 
 		}
 		a.label = p["label"]
 		a.renames = append(a.renames, a.label)
+		if a.label == "" {
+			a.label = "Window 22222222"
+		}
 		if a.failNext {
 			a.failNext = false
 			return context.DeadlineExceeded // The server applied it before the reply was lost.
 		}
 		response = map[string]any{}
+	case "com.superlogical.terminal.title":
+		p, ok := args.(map[string]any)
+		if !ok || p["session_id"] != labelSession {
+			return errors.New("wrong terminal title target")
+		}
+		block, ok := p["block_id"].(string)
+		if !ok {
+			return errors.New("missing terminal title block")
+		}
+		a.titleReads = append(a.titleReads, block)
+		response = map[string]any{"title": a.titles[block]}
 	default:
 		return fmt.Errorf("unexpected method %s", method)
 	}
@@ -119,6 +135,77 @@ func TestRexTabLabelSharedWindowAndManualRename(t *testing.T) {
 	require.Equal(t, "🔊 manually renamed", api.label)
 	third()
 	require.Equal(t, "manually renamed", api.label)
+}
+
+func TestRexTabLabelAutomaticAndExplicitNames(t *testing.T) {
+	for _, tc := range []struct {
+		name, original, marked, restored string
+		wantTitle                        bool
+	}{
+		{name: "automatic", original: "Window 22222222", marked: "🔊 dotfiles | master", restored: "", wantTitle: true},
+		{name: "explicit", original: "Review", marked: "🔊 Review", restored: "Review"},
+		{name: "default-looking explicit", original: "Window deadbeef", marked: "🔊 Window deadbeef", restored: "Window deadbeef"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api := &labelTestAPI{label: tc.original, titles: map[string]string{labelBlockA: "other pane", labelBlockB: "dotfiles | master"}}
+			dir := t.TempDir()
+			first := beginRexTabLabel(context.Background(), labelClient(t, api, dir, labelBlockB), labelID("N"))
+			second := beginRexTabLabel(context.Background(), labelClient(t, api, dir, labelBlockA), labelID("O"))
+			require.Equal(t, tc.marked, api.label)
+			first()
+			require.Equal(t, tc.marked, api.label)
+			second()
+			require.Equal(t, tc.original, api.label)
+			require.Equal(t, []string{tc.marked, tc.restored}, api.renames)
+			if tc.wantTitle {
+				require.Equal(t, []string{labelBlockB}, api.titleReads)
+			} else {
+				require.Empty(t, api.titleReads)
+			}
+		})
+	}
+}
+
+func TestRexAutomaticLabelPreservesManualRename(t *testing.T) {
+	api := &labelTestAPI{label: "Window 22222222", titles: map[string]string{labelBlockA: "dotfiles"}}
+	client := labelClient(t, api, t.TempDir(), labelBlockA)
+	finish := beginRexTabLabel(context.Background(), client, labelID("P"))
+	api.label = "manual title"
+	finish()
+	require.Equal(t, "manual title", api.label)
+	require.Equal(t, []string{"🔊 dotfiles"}, api.renames)
+}
+
+func TestRexAutomaticLabelWithoutTitleStaysAutomatic(t *testing.T) {
+	api := &labelTestAPI{label: "Window 22222222"}
+	client := labelClient(t, api, t.TempDir(), labelBlockA)
+	beginRexTabLabel(context.Background(), client, labelID("Q"))()
+	require.Equal(t, "Window 22222222", api.label)
+	require.Empty(t, api.renames)
+}
+
+func TestRexAutomaticLabelRecoversLegacyMarker(t *testing.T) {
+	for _, title := range []string{"dotfiles | master", ""} {
+		t.Run(title, func(t *testing.T) {
+			api := &labelTestAPI{label: "🔊 Window 22222222", titles: map[string]string{labelBlockA: title}}
+			dir := t.TempDir()
+			client := labelClient(t, api, dir, labelBlockA)
+			target := rexLabelTarget{"test-host", labelSession, labelWindow, api.label}
+			require.NoError(t, writeRexLabelState(rexLabelStatePath(dir, target), &rexLabelState{
+				Original: "Window 22222222", Owned: api.label,
+			}))
+			finish := beginRexTabLabel(context.Background(), client, labelID("R"))
+			if title != "" {
+				require.Equal(t, "🔊 "+title, api.label)
+			} else {
+				require.Equal(t, "Window 22222222", api.label)
+			}
+			finish()
+			require.Equal(t, "Window 22222222", api.label)
+			_, err := os.Stat(rexLabelStatePath(dir, target))
+			require.ErrorIs(t, err, os.ErrNotExist)
+		})
+	}
 }
 
 func TestRexTabLabelCleanupAfterUncertainRPCAndCancellation(t *testing.T) {
@@ -227,7 +314,7 @@ func TestRexTabLabelCoordinatorTimeout(t *testing.T) {
 
 func TestRexLabelStateRejectsSpecialFiles(t *testing.T) {
 	if path := os.Getenv("MCP_TTS_TEST_SPECIAL_FILE"); path != "" {
-		_, err := readRexLabelState(path)
+		_, err := readRexLabelState(path, labelWindow)
 		require.Error(t, err)
 		return
 	}

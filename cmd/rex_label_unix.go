@@ -98,7 +98,7 @@ func rexLabelStatePath(dir string, target rexLabelTarget) string {
 	return filepath.Join(dir, fmt.Sprintf("%x.json", key))
 }
 
-func readRexLabelState(path string) (*rexLabelState, error) {
+func readRexLabelState(path, window string) (*rexLabelState, error) {
 	f, err := openRexLabelFile(path, unix.O_RDONLY)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -113,7 +113,9 @@ func readRexLabelState(path string) (*rexLabelState, error) {
 	}
 	var state rexLabelState
 	if len(data) > rexLabelStateLimit || json.Unmarshal(data, &state) != nil ||
-		!validRexLabel(state.Original) || (state.Owned != "" && state.Owned != markedRexLabel(state.Original)) ||
+		!validRexLabel(state.Original) || !validRexLabel(state.Owned) ||
+		(state.Owned != "" && state.Owned != markedRexLabel(state.Original) &&
+			!(automaticRexLabel(window, state.Original) && strings.HasPrefix(state.Owned, rexLabelPrefix))) ||
 		len(state.Leases) > rexLabelLeaseLimit {
 		return nil, errors.New("invalid Rex label state")
 	}
@@ -180,7 +182,7 @@ func pruneRexLabelLeases(dir string, leases []string, remove string) ([]string, 
 
 func (r *rexLabelClient) update(ctx context.Context, dir string, target rexLabelTarget, lease string, starting bool) error {
 	path := rexLabelStatePath(dir, target)
-	state, err := readRexLabelState(path)
+	state, err := readRexLabelState(path, target.window)
 	if err != nil || (!starting && (state == nil || !slices.Contains(state.Leases, lease))) {
 		return err
 	}
@@ -201,8 +203,27 @@ func (r *rexLabelClient) update(ctx context.Context, dir string, target rexLabel
 		if state == nil || (len(state.Leases) == 0 && state.Owned == "") {
 			state = &rexLabelState{Original: target.label}
 			if !strings.HasPrefix(target.label, rexLabelPrefix) {
-				state.Owned = markedRexLabel(target.label)
+				state.Owned, err = r.speakingLabel(ctx, target)
+				if err != nil {
+					return err
+				}
 			}
+		} else if len(state.Leases) == 0 && automaticRexLabel(target.window, state.Original) {
+			// Refresh an abandoned automatic period, including v0.1.48's
+			// marker made from the raw default label, without losing its reset.
+			displayTarget := target
+			displayTarget.label = state.Original
+			owned, titleErr := r.speakingLabel(ctx, displayTarget)
+			if titleErr != nil {
+				if err := writeRexLabelState(path, state); err != nil {
+					return errors.Join(titleErr, err)
+				}
+				if err := r.rename(ctx, target, ""); err != nil {
+					return errors.Join(titleErr, err)
+				}
+				return errors.Join(titleErr, os.Remove(path))
+			}
+			state.Owned = owned
 		}
 		if len(state.Leases) >= rexLabelLeaseLimit {
 			return errors.New("too many simultaneous Rex label leases")
@@ -225,7 +246,11 @@ func (r *rexLabelClient) update(ctx context.Context, dir string, target rexLabel
 			return err
 		}
 		// Rex has no compare-and-set. A manual rename can race this last read.
-		if err := r.rename(ctx, target, state.Original); err != nil {
+		restore := state.Original
+		if automaticRexLabel(target.window, restore) {
+			restore = ""
+		}
+		if err := r.rename(ctx, target, restore); err != nil {
 			return err
 		}
 	}

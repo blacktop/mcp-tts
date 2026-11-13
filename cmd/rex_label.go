@@ -110,6 +110,32 @@ func (r *rexLabelClient) rename(ctx context.Context, target rexLabelTarget, labe
 	}, &struct{}{})
 }
 
+// Rex represents automatic naming with this exact ID-derived label. Its API
+// exposes no separate provenance flag; setting this value and clearing the
+// label both select the same default. Similar-looking labels remain explicit.
+func automaticRexLabel(window, label string) bool {
+	return validRexID("window", window) && label == "Window "+window[len(window)-8:]
+}
+
+func (r *rexLabelClient) speakingLabel(ctx context.Context, target rexLabelTarget) (string, error) {
+	label := target.label
+	if automaticRexLabel(target.window, label) {
+		var title struct {
+			Title string `json:"title"`
+		}
+		if err := r.request(ctx, "com.superlogical.terminal.title", map[string]any{
+			"session_id": target.session, "block_id": r.block, "args": struct{}{},
+		}, &title); err != nil {
+			return "", err
+		}
+		label = strings.TrimSpace(title.Title)
+		if label == "" || !utf8.ValidString(label) || strings.IndexFunc(label, unicode.IsControl) >= 0 {
+			return "", errors.New("Rex speaking terminal has no usable title")
+		}
+	}
+	return markedRexLabel(label), nil
+}
+
 func validRexLabel(label string) bool {
 	return utf8.ValidString(label) && utf8.RuneCountInString(label) <= 128 && strings.IndexFunc(label, unicode.IsControl) < 0
 }
