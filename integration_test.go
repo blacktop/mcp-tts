@@ -1049,19 +1049,22 @@ func TestMCPIntegration_ErrorHandling(t *testing.T) {
 	runner := NewMCPTestRunner(t)
 	defer runner.Close()
 
-	// Test with empty text
-	args := SayTTSArgs{
+	// Empty text fails validation before credentials or network access are
+	// needed. This tool is registered on every supported platform.
+	args := ElevenLabsArgs{
 		Text: "",
 	}
 
-	response, err := runner.callTool(7, "say_tts", args)
+	response, err := runner.callTool(7, "elevenlabs_tts", args)
 	require.NoError(t, err, "Tool call should complete even with error")
+	require.Nil(t, response.Error, "Validation errors must be tool results, not JSON-RPC errors")
 
 	// Should return an error result
 	assert.NotNil(t, response.Result, "Should return a result")
 
 	result, ok := response.Result.(map[string]any)
 	require.True(t, ok, "Result should be a map")
+	assert.Equal(t, true, result["isError"], "Invalid text must return a tool error")
 
 	content, ok := result["content"].([]any)
 	require.True(t, ok, "Result should contain content array")
