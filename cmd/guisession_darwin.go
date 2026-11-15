@@ -22,21 +22,57 @@ import (
 )
 
 const (
-	launchctlPath = "/bin/launchctl"
 	sayBinPath    = "/usr/bin/say"
 	afplayBinPath = "/usr/bin/afplay"
 
 	guiLabelPrefix = "com.blacktop.mcp-tts"
 
 	guiPollInterval = 50 * time.Millisecond
-	guiJobTimeout   = 120 * time.Second
+
+	// launchdNoSuchService is what `launchctl print` reports for a service
+	// that does not exist. launchd's output is unstructured, so this literal
+	// is the contract for confirming a job is gone.
+	launchdNoSuchService = "Could not find service"
 )
+
+// launchd timing and location. Variables so tests can shorten the waits and
+// stand in for launchctl.
+var (
+	launchctlPath = "/bin/launchctl"
+
+	// guiJobTimeout bounds one GUI job, and how long the speech lock is kept
+	// for a job that could not be confirmed removed.
+	guiJobTimeout = 120 * time.Second
+	// launchctlTimeout bounds every launchctl call except bootstrap.
+	launchctlTimeout = 5 * time.Second
+	// guiBootstrapTimeout bounds `launchctl bootstrap`, which runs while the
+	// speech lock is held.
+	guiBootstrapTimeout = 10 * time.Second
+	// guiRemoveRetryInterval paces removal retries for a GUI job that survived
+	// a timed-out bootstrap.
+	guiRemoveRetryInterval = 5 * time.Second
+)
+
+// runLaunchctl runs launchctl under its own deadline, so an unresponsive
+// launchd cannot hold up a caller that has no deadline of its own. A variable
+// so tests can stand in for launchd.
+var runLaunchctl = func(ctx context.Context, timeout time.Duration, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, launchctlPath, args...)
+	cmd.WaitDelay = time.Second
+	out, err := cmd.CombinedOutput()
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return out, fmt.Errorf("launchctl %s timed out after %s: %w", args[0], timeout, context.DeadlineExceeded)
+	}
+	return out, err
+}
 
 // sessionMode classifies the launchd audio context of this process.
 type sessionMode int
 
 const (
-	sessionAqua     sessionMode = iota // GUI login session; play in-process / direct exec.
+	sessionAqua     sessionMode = iota // GUI login session; players run as direct children.
 	sessionRoutable                    // Background session with a reachable gui/<uid> domain.
 	sessionHeadless                    // No reachable GUI session; local audio impossible.
 )
@@ -86,9 +122,9 @@ func detectSessionMode() (sessionMode, string) {
 // managerName returns the launchd job-manager name for this process
 // ("Aqua", "Background", "LoginWindow", "System", ...). On any error it returns
 // "Background" so callers fall through to the routing/headless branches rather
-// than wrongly assuming in-process audio works.
+// than wrongly assuming a direct child can reach the audio system.
 func managerName() string {
-	out, err := exec.Command(launchctlPath, "managername").CombinedOutput()
+	out, err := runLaunchctl(context.Background(), launchctlTimeout, "managername")
 	if err != nil {
 		log.Debug("launchctl managername failed; assuming non-Aqua session",
 			"error", err, "output", strings.TrimSpace(string(out)))
@@ -105,7 +141,7 @@ func parseManagerName(out string) string {
 // guiDomainReachable reports whether `launchctl print gui/<uid>` succeeds,
 // which is true iff an Aqua login session exists for this uid.
 func guiDomainReachable() bool {
-	out, err := exec.Command(launchctlPath, "print", guiDomainTarget()).CombinedOutput()
+	out, err := runLaunchctl(context.Background(), launchctlTimeout, "print", guiDomainTarget())
 	if err != nil {
 		log.Debug("gui domain unreachable", "target", guiDomainTarget(),
 			"error", err, "output", strings.TrimSpace(string(out)))
@@ -212,11 +248,98 @@ func runInGUISession(ctx context.Context, program string, args []string) error {
 	return waitGUIJobFn(ctx, handle)
 }
 
+// guiJobState is what launchd reports about a job after an attempt to remove it.
+type guiJobState int
+
+const (
+	guiJobAbsent       guiJobState = iota // launchd confirms the service does not exist
+	guiJobPresent                         // launchd still lists the service
+	guiJobUndetermined                    // launchd could not be asked
+)
+
+// guiOutcomeUnknownError reports a bootstrap that timed out. The job may have
+// started and spoken, in part or in full, before it was removed, so the error
+// never claims that nothing was spoken, and a retry can repeat speech.
+type guiOutcomeUnknownError struct {
+	label string
+	dir   string
+	state guiJobState
+}
+
+func (e *guiOutcomeUnknownError) Error() string {
+	outcome := "GUI job state could not be determined"
+	switch e.state {
+	case guiJobAbsent:
+		outcome = "GUI job removed"
+	case guiJobPresent:
+		outcome = "GUI job could not be removed, speech may still play"
+	case guiJobUndetermined:
+	}
+	return fmt.Sprintf("Playback outcome unknown; %s (launchctl bootstrap timed out after %s; retrying may repeat speech)",
+		outcome, guiBootstrapTimeout)
+}
+
+// removeGUIJob stops and boots out a job, then asks launchd whether it is gone.
+func removeGUIJob(label string) guiJobState {
+	killGUIJob(label)
+	bootoutGUIJob(label)
+	return probeGUIJob(label)
+}
+
+// probeGUIJob reports whether launchd still knows a job. Only launchd's
+// specific "no such service" answer counts as absence; a probe that fails or
+// times out leaves the state undetermined.
+func probeGUIJob(label string) guiJobState {
+	out, err := runLaunchctl(context.Background(), launchctlTimeout, "print", guiServiceTarget(label))
+	switch {
+	case err == nil:
+		return guiJobPresent
+	case strings.Contains(string(out), launchdNoSuchService):
+		return guiJobAbsent
+	default:
+		log.Debug("GUI job probe failed", "label", label, "error", err, "output", strings.TrimSpace(string(out)))
+		return guiJobUndetermined
+	}
+}
+
+// settleGUIStartFailure releases what a caller holds for a GUI job that failed
+// to start. When the job may still be running it keeps holding in the
+// background, retrying the removal, for at most guiJobTimeout.
+func settleGUIStartFailure(err error, release func()) {
+	var unknown *guiOutcomeUnknownError
+	if !errors.As(err, &unknown) || unknown.state == guiJobAbsent {
+		release()
+		return
+	}
+	playbackWG.Go(func() {
+		defer release()
+		defer os.RemoveAll(unknown.dir)
+		deadline := time.NewTimer(guiJobTimeout)
+		defer deadline.Stop()
+		retry := time.NewTicker(guiRemoveRetryInterval)
+		defer retry.Stop()
+		for {
+			select {
+			case <-serverCtx.Done():
+				return
+			case <-deadline.C:
+				log.Warn("GUI job could not be confirmed removed; releasing the speech lock", "label", unknown.label)
+				return
+			case <-retry.C:
+				if removeGUIJob(unknown.label) == guiJobAbsent {
+					return
+				}
+			}
+		}
+	})
+}
+
 // startGUIJob renders a transient launchd plist and bootstraps it into the
 // gui/<uid> domain synchronously, returning a handle to wait on. A bootstrap
 // failure is returned to the caller (the GUI-session analog of cmd.Start), so a
 // routable play path can surface it instead of silently reporting success. On
-// any error it removes the scratch dir it created.
+// any error it removes the scratch dir it created, unless the job may still be
+// running; a bootstrap that timed out returns a *guiOutcomeUnknownError.
 func startGUIJob(ctx context.Context, program string, args []string) (guiJobHandle, error) {
 	label := nextGUILabel()
 	dir, err := os.MkdirTemp("", "mcp-tts-gui-")
@@ -234,9 +357,17 @@ func startGUIJob(ctx context.Context, program string, args []string) (guiJobHand
 		return guiJobHandle{}, err
 	}
 
-	out, err := exec.CommandContext(ctx, launchctlPath, "bootstrap",
-		guiDomainTarget(), plistPath).CombinedOutput()
+	out, err := runLaunchctl(ctx, guiBootstrapTimeout, "bootstrap", guiDomainTarget(), plistPath)
 	if err != nil {
+		// Killing the launchctl client does not undo a submission launchd
+		// already accepted, so a timeout leaves the job's fate open.
+		if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+			state := removeGUIJob(label)
+			if state == guiJobAbsent {
+				os.RemoveAll(dir)
+			}
+			return guiJobHandle{}, &guiOutcomeUnknownError{label: label, dir: dir, state: state}
+		}
 		os.RemoveAll(dir)
 		return guiJobHandle{}, fmt.Errorf("launchctl bootstrap into %s failed: %w (output: %s)",
 			guiDomainTarget(), err, strings.TrimSpace(string(out)))
@@ -307,8 +438,7 @@ func pollGUIExit(ctx context.Context, label string) (int, error) {
 			return 0, fmt.Errorf("timed out (or cancelled) waiting for GUI audio job %s: %w",
 				label, deadlineCtx.Err())
 		case <-ticker.C:
-			out, _ := exec.CommandContext(deadlineCtx, launchctlPath, "print",
-				guiServiceTarget(label)).CombinedOutput()
+			out, _ := runLaunchctl(deadlineCtx, launchctlTimeout, "print", guiServiceTarget(label))
 			if code, done := parseGUIExitCode(string(out)); done {
 				return code, nil
 			}
@@ -344,8 +474,7 @@ func parseGUIExitCode(printOutput string) (code int, done bool) {
 // domain. Best-effort: a one-shot lingers showing its last exit code until
 // booted out, and a leftover label blocks re-bootstrap of the same label.
 func bootoutGUIJob(label string) {
-	if out, err := exec.Command(launchctlPath, "bootout",
-		guiServiceTarget(label)).CombinedOutput(); err != nil {
+	if out, err := runLaunchctl(context.Background(), launchctlTimeout, "bootout", guiServiceTarget(label)); err != nil {
 		log.Debug("launchctl bootout failed", "label", label,
 			"error", err, "output", strings.TrimSpace(string(out)))
 	}
@@ -354,8 +483,7 @@ func bootoutGUIJob(label string) {
 // killGUIJob sends SIGTERM to a still-running GUI job (used on ctx-cancel /
 // timeout before bootout). Best-effort.
 func killGUIJob(label string) {
-	if out, err := exec.Command(launchctlPath, "kill", "SIGTERM",
-		guiServiceTarget(label)).CombinedOutput(); err != nil {
+	if out, err := runLaunchctl(context.Background(), launchctlTimeout, "kill", "SIGTERM", guiServiceTarget(label)); err != nil {
 		log.Debug("launchctl kill failed", "label", label,
 			"error", err, "output", strings.TrimSpace(string(out)))
 	}
@@ -416,82 +544,71 @@ func startGUISay(
 func guiSayPlay(ctx context.Context, baseArgs []string, text, savedPath string, play bool) error {
 	wait, cleanup, err := startGUISay(ctx, baseArgs, text, savedPath, play)
 	if err != nil {
+		// No speech lock is held here; this only keeps retrying the removal
+		// of a job whose bootstrap timed out.
+		settleGUIStartFailure(err, func() {})
 		return err
 	}
 	defer cleanup()
 	return wait(ctx)
 }
 
-// startRoutableSayPlayback acquires the TTS lock and bootstraps a GUI-routed say
-// job synchronously — surfacing lock and launchctl bootstrap failures to the
-// caller, mirroring the in-process startSayPlayback contract — then detaches the
-// wait so a cancelled request cannot truncate speech.
-func startRoutableSayPlayback(baseArgs []string, text, savedPath string) error {
-	release, err := acquireTTSLock(serverCtx)
+// startRoutableSayPlayback takes the speech lock and bootstraps a GUI-routed say
+// job synchronously — surfacing admission and launchctl bootstrap failures to
+// the caller, mirroring the startSayPlayback contract — then detaches the wait
+// so a cancelled request cannot truncate speech.
+func startRoutableSayPlayback(ctx context.Context, baseArgs []string, text, savedPath string) error {
+	lock, err := acquireSpeechLock(ctx, "say_tts")
 	if err != nil {
-		return fmt.Errorf("failed to acquire TTS lock: %w", err)
+		return err
 	}
 	wait, cleanup, err := startGUISay(serverCtx, baseArgs, text, savedPath, true)
 	if err != nil {
-		release()
+		settleGUIStartFailure(err, lock.Release)
 		return err
 	}
 	playbackWG.Go(func() {
-		defer release()
 		defer cleanup()
-		if e := wait(serverCtx); e != nil && serverCtx.Err() == nil {
-			log.Error("GUI-routed say failed", "error", e)
+		err := wait(serverCtx)
+		if err != nil && serverCtx.Err() == nil {
+			log.Error("GUI-routed say failed", "error", err)
 		}
+		// wait can bootstrap a second job to play a saved file. If that
+		// timed out, the lock is kept while the job may still be speaking.
+		settleGUIStartFailure(err, lock.Release)
 	})
 	return nil
 }
 
-// writeTempFile creates a 0600 temp file from pattern, writes data, and returns
-// the path with a cleanup func. On any failure it removes the partial file.
-func writeTempFile(pattern string, data []byte) (string, func(), error) {
-	f, err := os.CreateTemp("", pattern)
-	if err != nil {
-		return "", func() {}, fmt.Errorf("creating temp file %q: %w", pattern, err)
-	}
-	path := f.Name()
-	if _, err := f.Write(data); err != nil {
-		f.Close()
-		os.Remove(path)
-		return "", func() {}, fmt.Errorf("writing temp file %q: %w", path, err)
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(path)
-		return "", func() {}, fmt.Errorf("closing temp file %q: %w", path, err)
-	}
-	return path, func() { os.Remove(path) }, nil
-}
-
 // playViaGUI saves a fully-buffered cloud audio payload to a temp file and plays
-// it through the GUI session via afplay, holding the TTS lock and tracking the
-// work in playbackWG exactly like the in-process path. ext is "mp3" or "wav".
+// it through the GUI session via afplay, holding the speech lock and tracking
+// the work in playbackWG exactly like the direct-child path. ext is "mp3" or
+// "wav".
 // The afplay job is bootstrapped synchronously so a launchd bootstrap failure
 // surfaces to deliverAudio instead of the caller being told audio is playing;
 // only the wait is detached so a cancelled request cannot truncate it.
-func playViaGUI(label, ext string, audioData []byte) error {
+func playViaGUI(ctx context.Context, label, ext string, audioData []byte) error {
 	path, cleanup, err := writeTempFile("mcp-tts-audio-*."+ext, audioData)
 	if err != nil {
 		return fmt.Errorf("preparing GUI audio for %s: %w", label, err)
 	}
-	release, err := acquireTTSLock(serverCtx)
+	lock, err := acquireSpeechLock(ctx, label)
 	if err != nil {
 		cleanup()
-		return fmt.Errorf("failed to acquire TTS lock: %w", err)
+		return err
 	}
 	stopSpeaking := beginRexSpeaking(serverCtx)
 	handle, err := startGUIJobFn(serverCtx, afplayBinPath, []string{path})
 	if err != nil {
 		stopSpeaking()
-		release()
-		cleanup()
+		settleGUIStartFailure(err, func() {
+			lock.Release()
+			cleanup()
+		})
 		return fmt.Errorf("starting GUI playback for %s: %w", label, err)
 	}
 	playbackWG.Go(func() {
-		defer release()
+		defer lock.Release()
 		defer cleanup()
 		defer stopSpeaking()
 		if e := waitGUIJobFn(serverCtx, handle); e != nil && serverCtx.Err() == nil {
@@ -503,10 +620,10 @@ func playViaGUI(label, ext string, audioData []byte) error {
 
 // routeCloudPlayback decides how a cloud provider's buffered audio is played
 // based on the session mode. Returns (handled, error): handled=false means the
-// caller should fall back to in-process playback (Aqua / non-darwin). build is
+// caller should play the audio as a direct child (Aqua / non-darwin). build is
 // invoked only when routing is required, so callers never pay to materialize the
-// afplay-ready bytes (e.g. wrap PCM in a WAV) on the in-process Aqua path.
-func routeCloudPlayback(label, ext string, build func() ([]byte, error)) (handled bool, err error) {
+// afplay-ready bytes (e.g. wrap PCM in a WAV) on the direct-child Aqua path.
+func routeCloudPlayback(ctx context.Context, label, ext string, build func() ([]byte, error)) (handled bool, err error) {
 	mode, name := sessionModeFn()
 	switch mode {
 	case sessionAqua:
@@ -516,7 +633,7 @@ func routeCloudPlayback(label, ext string, build func() ([]byte, error)) (handle
 		if err != nil {
 			return true, err
 		}
-		return true, playViaGUI(label, ext, audioData)
+		return true, playViaGUI(ctx, label, ext, audioData)
 	case sessionHeadless:
 		return true, errors.New(headlessAudioError(name))
 	default:
@@ -538,7 +655,7 @@ func cleanupStaleGUIJobs() {
 	if mode != sessionRoutable {
 		return
 	}
-	out, err := exec.Command(launchctlPath, "print", guiDomainTarget()).CombinedOutput()
+	out, err := runLaunchctl(context.Background(), launchctlTimeout, "print", guiDomainTarget())
 	if err != nil {
 		log.Debug("cleanupStaleGUIJobs: print failed", "target", guiDomainTarget(),
 			"error", err, "output", strings.TrimSpace(string(out)))

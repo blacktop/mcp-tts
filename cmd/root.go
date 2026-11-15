@@ -36,12 +36,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/blacktop/mcp-tts/internal/playback"
+	"github.com/blacktop/mcp-tts/internal/speechlock"
 	"github.com/caarlos0/ctrlc"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/log"
-	"github.com/gopxl/beep/v2"
-	"github.com/gopxl/beep/v2/mp3"
-	"github.com/gopxl/beep/v2/speaker"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
@@ -69,128 +68,46 @@ var (
 	// cutting off detached audio — e.g. a one-shot `cat msgs.jsonl | mcp-tts`
 	// or a final notification right before the session ends.
 	playbackWG sync.WaitGroup
-	// Global TTS mutex to prevent concurrent speech
-	ttsMutex sync.Mutex
 	// Flag to enable/disable sequential TTS (default: true)
 	sequentialTTS bool = true
-	// Speaker is initialized once; all streams resample to the initial rate
-	speakerInitOnce   sync.Once
-	speakerInitErr    error
-	speakerSampleRate beep.SampleRate
 	// Audio saving options
 	outputDir          string // Directory to save audio files
 	noPlay             bool   // Skip playback when saving
 	rexTabLabelEnabled bool   // Opt in to temporary Rex tab labels
 )
 
-// acquireTTSLock attempts to acquire the TTS mutex with context support.
-// Returns a release function that should be deferred.
-func acquireTTSLock(ctx context.Context) (func(), error) {
-	if !sequentialTTS {
-		return func() {}, nil
-	}
-
-	pid := os.Getpid()
-	log.Debug("Attempting to acquire local TTS mutex", "pid", pid)
-	acquired := make(chan struct{})
-
-	go func() {
-		ttsMutex.Lock()
-		log.Debug("Local TTS mutex acquired", "pid", pid)
-		close(acquired)
-	}()
-
-	select {
-	case <-acquired:
-		log.Debug("Attempting to acquire global TTS lock", "pid", pid)
-		globalRelease, err := acquireGlobalTTSLock(ctx)
-		if err != nil {
-			log.Debug("Failed to acquire global lock, releasing local mutex", "pid", pid, "error", err)
-			ttsMutex.Unlock()
-			return nil, err
-		}
-
-		log.Debug("Both TTS locks acquired successfully", "pid", pid)
-		return func() {
-			log.Debug("Releasing both TTS locks", "pid", pid)
-			globalRelease()
-			ttsMutex.Unlock()
-			log.Debug("Both TTS locks released", "pid", pid)
-		}, nil
-
-	case <-ctx.Done():
-		select {
-		case <-acquired:
-			ttsMutex.Unlock()
-		default:
-		}
-		return nil, ctx.Err()
-	}
-}
-
-// initSpeaker initializes the speaker once with the given sample rate.
-// The first TTS call determines the speaker sample rate for the process lifetime.
-// Subsequent calls with different sample rates will have their audio resampled.
-// Common rates: OpenAI/Google=24000Hz, ElevenLabs=44100Hz.
-func initSpeaker(sampleRate beep.SampleRate) error {
-	speakerInitOnce.Do(func() {
-		speakerSampleRate = sampleRate
-		speakerInitErr = speaker.Init(sampleRate, sampleRate.N(time.Second/10))
-	})
-	return speakerInitErr
-}
-
-// resampleToSpeaker resamples the streamer to match the speaker's sample rate.
-// Must be called after initSpeaker. Returns the original streamer if rates match.
-func resampleToSpeaker(streamer beep.Streamer, from beep.SampleRate) beep.Streamer {
-	if speakerSampleRate == 0 || from == speakerSampleRate {
-		return streamer
-	}
-	return beep.Resample(4, from, speakerSampleRate, streamer)
-}
-
-// playInBackground acquires the TTS lock synchronously, then runs the playback
-// function detached from the request that triggered it. This surfaces lock
-// acquisition failures to the caller while still letting playback outlive a
-// cancelled or timed-out tool request.
-func playInBackground(label string, play func(ctx context.Context)) error {
-	release, err := acquireTTSLock(serverCtx)
+// startSayPlayback takes the speech lock and starts `say` before returning, so
+// admission and start failures reach the caller. The process is then followed
+// in the background, so request cancellation cannot truncate speech.
+func startSayPlayback(ctx context.Context, playArgs []string, savedPath, text string) error {
+	lock, err := acquireSpeechLock(ctx, "say_tts")
 	if err != nil {
-		return fmt.Errorf("failed to acquire TTS lock: %w", err)
+		return err
 	}
-
-	playbackWG.Go(func() {
-		defer release()
-		stopSpeaking := beginRexSpeaking(serverCtx)
-		defer stopSpeaking()
-		log.Debug("Starting background playback", "label", label)
-		play(serverCtx)
+	budget := playback.BudgetForText(len(text))
+	log.Debug("Starting say command", "args", playArgs)
+	proc, err := startPlayback(playback.Spec{
+		Label:    "say_tts",
+		Path:     "/usr/bin/say",
+		Args:     playArgs,
+		Budget:   budget,
+		Lock:     lock,
+		Diagnose: playbackDiagnostic(),
 	})
-	return nil
-}
-
-func startSayPlayback(playArgs []string, savedPath, text string) error {
-	release, err := acquireTTSLock(serverCtx)
 	if err != nil {
-		return fmt.Errorf("failed to acquire TTS lock: %w", err)
+		lock.Release()
+		return fmt.Errorf("failed to start say command: %w", err)
 	}
 
 	stopSpeaking := func() {}
 	if savedPath == "" {
 		stopSpeaking = beginRexSpeaking(serverCtx)
 	}
-	cmd := exec.CommandContext(serverCtx, "/usr/bin/say", playArgs...)
-	log.Debug("Starting say command", "args", playArgs)
-	if err := cmd.Start(); err != nil {
-		stopSpeaking()
-		release()
-		return fmt.Errorf("failed to start say command: %w", err)
-	}
-
 	playbackWG.Go(func() {
-		defer release()
-		defer stopSpeaking()
-		if err := cmd.Wait(); err != nil {
+		defer lock.Release()
+		err := proc.Wait(serverCtx)
+		stopSpeaking()
+		if err != nil {
 			if serverCtx.Err() == nil {
 				log.Error("Say command failed", "error", err)
 			}
@@ -198,66 +115,60 @@ func startSayPlayback(playArgs []string, savedPath, text string) error {
 		}
 		// say -o wrote the file without playing; play it now.
 		if savedPath != "" {
-			stopSavedSpeech := beginRexSpeaking(serverCtx)
-			defer stopSavedSpeech()
-			log.Debug("Playing saved AIFF file", "path", savedPath)
-			if err := exec.CommandContext(serverCtx, "afplay", savedPath).Run(); err != nil && serverCtx.Err() == nil {
-				log.Warn("Failed to play saved audio", "error", err)
-			}
+			playSavedSpeech(lock, savedPath, budget)
 		}
 		log.Info("Speaking text completed", "text", text)
 	})
-
 	return nil
 }
 
-// playStreamer plays a beep streamer and blocks until playback finishes or ctx
-// is cancelled (server shutdown), clearing the speaker on cancellation.
-func playStreamer(ctx context.Context, streamer beep.Streamer) {
-	done := make(chan struct{})
-	speaker.Play(beep.Seq(streamer, beep.Callback(func() { close(done) })))
-	select {
-	case <-done:
-	case <-ctx.Done():
-		speaker.Clear()
+// playSavedSpeech plays an AIFF that `say -o` wrote, under the speech lock the
+// caller already holds.
+func playSavedSpeech(lock *speechlock.Lock, savedPath string, budget time.Duration) {
+	stopSpeaking := beginRexSpeaking(serverCtx)
+	defer stopSpeaking()
+	log.Debug("Playing saved AIFF file", "path", savedPath)
+	proc, err := startPlayback(playback.Spec{
+		Label:    "say_tts",
+		Path:     "/usr/bin/afplay",
+		Args:     []string{savedPath},
+		Budget:   budget,
+		Lock:     lock,
+		Diagnose: playbackDiagnostic(),
+	})
+	if err == nil {
+		err = proc.Wait(serverCtx)
+	}
+	if err != nil && serverCtx.Err() == nil {
+		log.Warn("Failed to play saved audio", "error", err)
 	}
 }
 
-// playMP3 decodes MP3 bytes and initializes the speaker synchronously — so a
-// corrupt/undecodable response or an unavailable audio device surfaces as an
-// error to the caller — then detaches the real-time playback so a cancelled or
-// timed-out tool call cannot truncate the audio.
-func playMP3(label string, audioData []byte) error {
-	if handled, err := routeCloudPlayback(label, "mp3", func() ([]byte, error) {
+// playMP3 validates and measures the MP3 before anything is played, so a
+// corrupt response reaches the caller, then starts playback in its own process
+// and detaches it so a cancelled or timed-out tool call cannot truncate it.
+func playMP3(ctx context.Context, label, text string, audioData []byte) error {
+	if handled, err := routeCloudPlayback(ctx, label, "mp3", func() ([]byte, error) {
 		return audioData, nil
 	}); handled {
 		return err
 	}
-	streamer, format, err := mp3.Decode(io.NopCloser(bytes.NewReader(audioData)))
+	duration, err := mp3Duration(audioData)
 	if err != nil {
 		return fmt.Errorf("failed to decode audio: %w", err)
 	}
-	if err := initSpeaker(format.SampleRate); err != nil {
-		streamer.Close()
-		return fmt.Errorf("failed to initialize speaker: %w", err)
-	}
-	if err := playInBackground(label, func(ctx context.Context) {
-		defer streamer.Close()
-		log.Info("Speaking text", "label", label)
-		playStreamer(ctx, resampleToSpeaker(streamer, format.SampleRate))
-		log.Debug("Finished speaking", "label", label)
-	}); err != nil {
-		streamer.Close()
-		return err
-	}
-	return nil
+	return startClip(ctx, clip{
+		label:  label,
+		format: clipMP3,
+		data:   audioData,
+		budget: clipBudget(label, duration, len(text)),
+	})
 }
 
-// playPCM initializes the speaker synchronously (surfacing an unavailable audio
-// device to the caller) then detaches real-time playback of raw 16-bit
-// little-endian PCM samples.
-func playPCM(label string, audioData []byte, sampleRate int) error {
-	if handled, err := routeCloudPlayback(label, "wav", func() ([]byte, error) {
+// playPCM starts playback of raw 16-bit little-endian mono PCM samples in its
+// own process and detaches it.
+func playPCM(ctx context.Context, label, text string, audioData []byte, sampleRate int) error {
+	if handled, err := routeCloudPlayback(ctx, label, "wav", func() ([]byte, error) {
 		var buf bytes.Buffer
 		if err := writeWAVHeader(&buf, len(audioData), sampleRate, 1, 16); err != nil {
 			return nil, fmt.Errorf("building WAV for GUI playback: %w", err)
@@ -267,26 +178,24 @@ func playPCM(label string, audioData []byte, sampleRate int) error {
 	}); handled {
 		return err
 	}
-	stream := &PCMStream{data: audioData, sampleRate: beep.SampleRate(sampleRate)}
-	if err := initSpeaker(stream.sampleRate); err != nil {
-		return fmt.Errorf("failed to initialize speaker: %w", err)
-	}
-	if err := playInBackground(label, func(ctx context.Context) {
-		log.Info("Speaking text", "label", label)
-		playStreamer(ctx, resampleToSpeaker(stream, stream.sampleRate))
-		log.Debug("Finished speaking", "label", label)
-	}); err != nil {
-		return err
-	}
-	return nil
+	return startClip(ctx, clip{
+		label:      label,
+		format:     clipPCM,
+		data:       audioData,
+		sampleRate: sampleRate,
+		budget:     clipBudget(label, pcmDuration(audioData, sampleRate), len(text)),
+	})
 }
 
 // deliverAudio runs the save/play/result tail shared by the cloud TTS handlers,
 // which each produce a full audio buffer. It saves synchronously when enabled
 // (so the returned path is accurate and save errors surface), returns early in
-// no-play mode, otherwise prepares playback synchronously via play (decode +
-// speaker init errors surface to the caller) which then detaches the audio.
-func deliverAudio(text string, audioData []byte, save func([]byte, string) (string, error), play func() error) (*mcp.CallToolResult, any, error) {
+// no-play mode, otherwise starts playback via play, which reports admission,
+// decode and startup failures before the audio is detached.
+func deliverAudio(
+	ctx context.Context, text string, audioData []byte,
+	save func([]byte, string) (string, error), play func(context.Context) error,
+) (*mcp.CallToolResult, any, error) {
 	var savedPath string
 	if shouldSave() {
 		var err error
@@ -299,7 +208,10 @@ func deliverAudio(text string, audioData []byte, save func([]byte, string) (stri
 	if !shouldPlay() {
 		return textResult(formatSaveResult(text, savedPath, false)), nil, nil
 	}
-	if err := play(); err != nil {
+	if err := play(ctx); err != nil {
+		if ctx.Err() != nil {
+			return textResult("Request cancelled"), nil, nil
+		}
 		log.Error("Failed to start playback", "error", err)
 		return errorResult(fmt.Sprintf("Error: %v", err)), nil, nil
 	}
@@ -657,7 +569,10 @@ Designed to be used with the MCP (Model Context Protocol).`,
 				}
 
 				if mode == sessionRoutable {
-					if err := startRoutableSayPlayback(args, text, savedPath); err != nil {
+					if err := startRoutableSayPlayback(ctx, args, text, savedPath); err != nil {
+						if ctx.Err() != nil {
+							return textResult("Say command cancelled"), nil, nil
+						}
 						log.Error("Failed to start GUI-routed say playback", "error", err)
 						return errorResult(fmt.Sprintf("Error: %v", err)), nil, nil
 					}
@@ -670,7 +585,10 @@ Designed to be used with the MCP (Model Context Protocol).`,
 				}
 				playArgs = append(playArgs, text)
 
-				if err := startSayPlayback(playArgs, savedPath, text); err != nil {
+				if err := startSayPlayback(ctx, playArgs, savedPath, text); err != nil {
+					if ctx.Err() != nil {
+						return textResult("Say command cancelled"), nil, nil
+					}
 					log.Error("Failed to start say playback", "error", err)
 					return errorResult(fmt.Sprintf("Error: %v", err)), nil, nil
 				}
@@ -785,8 +703,8 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			}
 			log.Debug("ElevenLabs audio received", "bytes", len(audioData))
 
-			return deliverAudio(text, audioData, saveMP3, func() error {
-				return playMP3("elevenlabs_tts", audioData)
+			return deliverAudio(ctx, text, audioData, saveMP3, func(ctx context.Context) error {
+				return playMP3(ctx, "elevenlabs_tts", text, audioData)
 			})
 		})
 
@@ -904,9 +822,11 @@ Designed to be used with the MCP (Model Context Protocol).`,
 
 			const googleTTSSampleRate = 24000
 
-			return deliverAudio(text, audioData,
+			return deliverAudio(ctx, text, audioData,
 				func(d []byte, t string) (string, error) { return saveWAV(d, googleTTSSampleRate, t) },
-				func() error { return playPCM("google_tts", audioData, googleTTSSampleRate) },
+				func(ctx context.Context) error {
+					return playPCM(ctx, "google_tts", text, audioData, googleTTSSampleRate)
+				},
 			)
 		})
 
@@ -1025,8 +945,8 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			}
 			log.Debug("OpenAI TTS audio data received", "bytes", len(audioData))
 
-			return deliverAudio(text, audioData, saveMP3, func() error {
-				return playMP3("openai_tts", audioData)
+			return deliverAudio(ctx, text, audioData, saveMP3, func(ctx context.Context) error {
+				return playMP3(ctx, "openai_tts", text, audioData)
 			})
 		})
 
@@ -1065,9 +985,9 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			runErr := s.Run(serverCtx, &mcp.StdioTransport{})
 			// Transport closed (one-shot pipe or client disconnect): let any
 			// detached playback finish before exiting so audio isn't cut off.
-			// Ctrl-C cancels serverCtx, which stops playback and drains this.
+			// Each playback is bounded by its own budget, so this wait ends.
 			log.Debug("Transport closed; waiting for in-flight playback")
-			playbackWG.Wait()
+			drainPlayback(serverCancel)
 			// A closed stdio transport (EOF) is the normal end of a session,
 			// not a failure — only surface genuine serve errors.
 			if runErr != nil && !errors.Is(runErr, io.EOF) {
@@ -1077,6 +997,9 @@ Designed to be used with the MCP (Model Context Protocol).`,
 		}); err != nil {
 			if errors.As(err, &ctrlc.ErrorCtrlC{}) {
 				log.Warn("Exiting...")
+				// Players run in their own process groups and do not see the
+				// terminal's interrupt, so end them before exiting.
+				stopPlayback(serverCancel)
 				os.Exit(0)
 			} else {
 				return fmt.Errorf("failed while serving MCP: %v", err)

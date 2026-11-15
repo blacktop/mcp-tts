@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -257,8 +258,8 @@ func fakeGUIJobs(t *testing.T, bootstrapErr, waitErr error, started *[]string) {
 }
 
 // withTestServerCtx points serverCtx at a fresh cancellable context and disables
-// sequential locking so detached playback in tests does not touch the global
-// file lock. It drains playbackWG and restores prior state on cleanup.
+// sequential speech so detached playback in tests does not touch the user's
+// speech lock. It drains playbackWG and restores prior state on cleanup.
 func withTestServerCtx(t *testing.T) {
 	t.Helper()
 	prevCtx, prevSeq := serverCtx, sequentialTTS
@@ -274,9 +275,9 @@ func withTestServerCtx(t *testing.T) {
 
 func TestRouteCloudPlaybackAqua(t *testing.T) {
 	fakeSessionMode(t, sessionAqua, "Aqua")
-	handled, err := routeCloudPlayback("openai_tts", "mp3", func() ([]byte, error) { return []byte("data"), nil })
+	handled, err := routeCloudPlayback(context.Background(), "openai_tts", "mp3", func() ([]byte, error) { return []byte("data"), nil })
 	if handled {
-		t.Fatalf("routeCloudPlayback(Aqua) handled = true, want false (in-process fallback)")
+		t.Fatalf("routeCloudPlayback(Aqua) handled = true, want false (direct-child fallback)")
 	}
 	if err != nil {
 		t.Fatalf("routeCloudPlayback(Aqua) err = %v, want nil", err)
@@ -285,7 +286,7 @@ func TestRouteCloudPlaybackAqua(t *testing.T) {
 
 func TestRouteCloudPlaybackHeadless(t *testing.T) {
 	fakeSessionMode(t, sessionHeadless, "Background")
-	handled, err := routeCloudPlayback("openai_tts", "mp3", func() ([]byte, error) { return []byte("data"), nil })
+	handled, err := routeCloudPlayback(context.Background(), "openai_tts", "mp3", func() ([]byte, error) { return []byte("data"), nil })
 	if !handled {
 		t.Fatalf("routeCloudPlayback(headless) handled = false, want true")
 	}
@@ -303,7 +304,7 @@ func TestRouteCloudPlaybackRoutableBootstrapErrorSurfaces(t *testing.T) {
 	bootErr := errors.New("bootstrap boom")
 	fakeGUIJobs(t, bootErr, nil, nil)
 
-	handled, err := routeCloudPlayback("openai_tts", "mp3", func() ([]byte, error) { return []byte("data"), nil })
+	handled, err := routeCloudPlayback(context.Background(), "openai_tts", "mp3", func() ([]byte, error) { return []byte("data"), nil })
 	if !handled {
 		t.Fatalf("routeCloudPlayback(routable) handled = false, want true")
 	}
@@ -318,7 +319,7 @@ func TestRouteCloudPlaybackRoutableSuccessDetaches(t *testing.T) {
 	var started []string
 	fakeGUIJobs(t, nil, nil, &started)
 
-	handled, err := routeCloudPlayback("openai_tts", "mp3", func() ([]byte, error) { return []byte("data"), nil })
+	handled, err := routeCloudPlayback(context.Background(), "openai_tts", "mp3", func() ([]byte, error) { return []byte("data"), nil })
 	if !handled || err != nil {
 		t.Fatalf("routeCloudPlayback(routable) = (%v, %v), want (true, nil)", handled, err)
 	}
@@ -347,7 +348,7 @@ func TestStartRoutableSayPlaybackBootstrapErrorSurfaces(t *testing.T) {
 	withTestServerCtx(t)
 	fakeGUIJobs(t, errors.New("bootstrap boom"), nil, nil)
 
-	err := startRoutableSayPlayback([]string{"--rate", "200"}, "hello", "")
+	err := startRoutableSayPlayback(context.Background(), []string{"--rate", "200"}, "hello", "")
 	if err == nil || !strings.Contains(err.Error(), "bootstrap boom") {
 		t.Fatalf("startRoutableSayPlayback() err = %v, want surfaced bootstrap error", err)
 	}
@@ -358,7 +359,7 @@ func TestStartRoutableSayPlaybackSuccessDetaches(t *testing.T) {
 	var started []string
 	fakeGUIJobs(t, nil, nil, &started)
 
-	if err := startRoutableSayPlayback([]string{"--rate", "200"}, "hello", ""); err != nil {
+	if err := startRoutableSayPlayback(context.Background(), []string{"--rate", "200"}, "hello", ""); err != nil {
 		t.Fatalf("startRoutableSayPlayback() err = %v, want nil", err)
 	}
 	playbackWG.Wait()
@@ -483,5 +484,255 @@ func TestGUIRoutedSaveWritesRealAIFF(t *testing.T) {
 	if info.Size() < 50_000 {
 		t.Fatalf("saved AIFF is %d bytes; expected >50000 for a real 10-word clip "+
 			"(broken Background stub is ~a few hundred bytes)", info.Size())
+	}
+}
+
+// fakeLaunchd stands in for launchctl. bootstrap always times out; print
+// answers with the queued replies in order, repeating the last one.
+type fakeLaunchd struct {
+	mu     sync.Mutex
+	calls  []string
+	prints []func() ([]byte, error)
+}
+
+func (f *fakeLaunchd) run(_ context.Context, _ time.Duration, args ...string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, args[0])
+	switch args[0] {
+	case "bootstrap":
+		return nil, fmt.Errorf("launchctl bootstrap timed out: %w", context.DeadlineExceeded)
+	case "print":
+		reply := f.prints[0]
+		if len(f.prints) > 1 {
+			f.prints = f.prints[1:]
+		}
+		return reply()
+	}
+	return nil, nil
+}
+
+func (f *fakeLaunchd) count(subcommand string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, call := range f.calls {
+		if call == subcommand {
+			n++
+		}
+	}
+	return n
+}
+
+func useFakeLaunchd(t *testing.T, prints ...func() ([]byte, error)) *fakeLaunchd {
+	t.Helper()
+	fake := &fakeLaunchd{prints: prints}
+	original := runLaunchctl
+	runLaunchctl = fake.run
+	t.Cleanup(func() { runLaunchctl = original })
+	return fake
+}
+
+func launchdNotFound() ([]byte, error) {
+	return []byte("Bad request.\nCould not find service \"x\" in domain for user gui: 501\n"), errors.New("exit status 113")
+}
+
+func launchdStillPresent() ([]byte, error) {
+	return []byte("com.blacktop.mcp-tts.1.1 = {\n\tstate = running\n}\n"), nil
+}
+
+func launchdUnreachable() ([]byte, error) {
+	return nil, fmt.Errorf("launchctl print timed out: %w", context.DeadlineExceeded)
+}
+
+func TestStartGUIJobBootstrapTimeoutNeverClaimsSilence(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		print     func() ([]byte, error)
+		wantState guiJobState
+		wantText  string
+	}{
+		{"job removed", launchdNotFound, guiJobAbsent, "Playback outcome unknown; GUI job removed"},
+		{"job still present", launchdStillPresent, guiJobPresent, "Playback outcome unknown; GUI job could not be removed, speech may still play"},
+		{"probe failed", launchdUnreachable, guiJobUndetermined, "Playback outcome unknown; GUI job state could not be determined"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := useFakeLaunchd(t, tc.print)
+			_, err := startGUIJob(context.Background(), afplayBinPath, []string{"/tmp/x.mp3"})
+
+			var unknown *guiOutcomeUnknownError
+			if !errors.As(err, &unknown) {
+				t.Fatalf("startGUIJob() err = %v, want *guiOutcomeUnknownError", err)
+			}
+			if unknown.state != tc.wantState {
+				t.Fatalf("state = %v, want %v", unknown.state, tc.wantState)
+			}
+			if !strings.Contains(err.Error(), tc.wantText) {
+				t.Fatalf("err = %q, want it to contain %q", err, tc.wantText)
+			}
+			if lower := strings.ToLower(err.Error()); strings.Contains(lower, "not spoken") || strings.Contains(lower, "nothing was spoken") {
+				t.Fatalf("err = %q claims nothing was spoken; the job may have run", err)
+			}
+			if !strings.Contains(err.Error(), "retrying may repeat speech") {
+				t.Fatalf("err = %q does not warn that a retry can repeat speech", err)
+			}
+			if fake.count("kill") != 1 || fake.count("bootout") != 1 {
+				t.Fatalf("launchctl calls = %v, want one kill and one bootout", fake.calls)
+			}
+			_, statErr := os.Stat(unknown.dir)
+			if removed := os.IsNotExist(statErr); removed != (tc.wantState == guiJobAbsent) {
+				t.Fatalf("scratch dir removed = %v for state %v", removed, tc.wantState)
+			}
+			os.RemoveAll(unknown.dir)
+		})
+	}
+}
+
+func TestStartGUIJobCancelledBootstrapIsNotAmbiguous(t *testing.T) {
+	useFakeLaunchd(t, launchdNotFound)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := startGUIJob(ctx, afplayBinPath, []string{"/tmp/x.mp3"})
+	var unknown *guiOutcomeUnknownError
+	if err == nil || errors.As(err, &unknown) {
+		t.Fatalf("startGUIJob() with a cancelled context = %v, want a plain bootstrap error", err)
+	}
+}
+
+func TestPlayViaGUIReleasesLockWhenTimedOutJobIsGone(t *testing.T) {
+	lockPath := useTestSpeechLock(t)
+	useTestServer(t)
+	useFakeLaunchd(t, launchdNotFound)
+
+	err := playViaGUI(context.Background(), "openai_tts", "mp3", []byte("data"))
+	if err == nil || !strings.Contains(err.Error(), "GUI job removed") {
+		t.Fatalf("playViaGUI() err = %v, want the unknown-outcome error", err)
+	}
+	requireSpeechLockFree(t, lockPath)
+}
+
+func TestPlayViaGUIKeepsLockUntilTimedOutJobIsConfirmedGone(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		first func() ([]byte, error)
+	}{
+		{"job still present", launchdStillPresent},
+		{"probe failed", launchdUnreachable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lockPath := useTestSpeechLock(t)
+			useTestServer(t)
+			originalRetry := guiRemoveRetryInterval
+			guiRemoveRetryInterval = 400 * time.Millisecond
+			t.Cleanup(func() { guiRemoveRetryInterval = originalRetry })
+			// The first probe cannot confirm removal; the retry can.
+			fake := useFakeLaunchd(t, tc.first, launchdNotFound)
+
+			err := playViaGUI(context.Background(), "openai_tts", "mp3", []byte("data"))
+			if err == nil || !strings.Contains(err.Error(), "Playback outcome unknown") {
+				t.Fatalf("playViaGUI() err = %v, want the unknown-outcome error", err)
+			}
+			if !speechLockHeld(lockPath) {
+				t.Fatal("speech lock was released while the GUI job might still be speaking")
+			}
+			playbackWG.Wait()
+			requireSpeechLockFree(t, lockPath)
+			if fake.count("bootout") < 2 {
+				t.Fatalf("launchctl calls = %v, want the removal retried", fake.calls)
+			}
+		})
+	}
+}
+
+func TestSettleGUIStartFailureGivesUpAfterJobTimeout(t *testing.T) {
+	lockPath := useTestSpeechLock(t)
+	useTestServer(t)
+	originalRetry, originalTimeout := guiRemoveRetryInterval, guiJobTimeout
+	guiRemoveRetryInterval, guiJobTimeout = 100*time.Millisecond, 500*time.Millisecond
+	t.Cleanup(func() { guiRemoveRetryInterval, guiJobTimeout = originalRetry, originalTimeout })
+	useFakeLaunchd(t, launchdStillPresent)
+
+	began := time.Now()
+	err := playViaGUI(context.Background(), "openai_tts", "mp3", []byte("data"))
+	if err == nil {
+		t.Fatal("playViaGUI() = nil, want the unknown-outcome error")
+	}
+	playbackWG.Wait()
+	if held := time.Since(began); held < guiJobTimeout || held > guiJobTimeout+5*time.Second {
+		t.Fatalf("speech lock was kept for %s, want about %s", held, guiJobTimeout)
+	}
+	requireSpeechLockFree(t, lockPath)
+}
+
+func TestStartRoutableSayPlaybackKeepsLockForUnremovedJob(t *testing.T) {
+	lockPath := useTestSpeechLock(t)
+	useTestServer(t)
+	originalRetry := guiRemoveRetryInterval
+	guiRemoveRetryInterval = 400 * time.Millisecond
+	t.Cleanup(func() { guiRemoveRetryInterval = originalRetry })
+	useFakeLaunchd(t, launchdStillPresent, launchdNotFound)
+
+	err := startRoutableSayPlayback(context.Background(), []string{"--rate", "200"}, "hello", "")
+	if err == nil || !strings.Contains(err.Error(), "speech may still play") {
+		t.Fatalf("startRoutableSayPlayback() err = %v, want the unknown-outcome error", err)
+	}
+	if !speechLockHeld(lockPath) {
+		t.Fatal("speech lock was released while the GUI say job might still be speaking")
+	}
+	playbackWG.Wait()
+	requireSpeechLockFree(t, lockPath)
+}
+
+// A launchctl that never answers must not hold a caller that has no deadline
+// of its own, which is how the speech lock used to be kept indefinitely.
+func TestStartGUIJobIsBoundedWhenLaunchctlHangs(t *testing.T) {
+	originalPath, originalBootstrap, originalCall := launchctlPath, guiBootstrapTimeout, launchctlTimeout
+	launchctlPath, guiBootstrapTimeout, launchctlTimeout = os.Args[0], 300*time.Millisecond, 300*time.Millisecond
+	t.Cleanup(func() {
+		launchctlPath, guiBootstrapTimeout, launchctlTimeout = originalPath, originalBootstrap, originalCall
+	})
+	t.Setenv(fakeLaunchctlEnv, "hang")
+
+	began := time.Now()
+	_, err := startGUIJob(context.Background(), afplayBinPath, []string{"/tmp/x.mp3"})
+	took := time.Since(began)
+
+	var unknown *guiOutcomeUnknownError
+	if !errors.As(err, &unknown) {
+		t.Fatalf("startGUIJob() err = %v, want *guiOutcomeUnknownError", err)
+	}
+	if unknown.state != guiJobUndetermined {
+		t.Fatalf("state = %v, want undetermined: a probe that timed out proves nothing", unknown.state)
+	}
+	// bootstrap, kill, bootout and print each time out once.
+	if limit := 4*300*time.Millisecond + 8*time.Second; took > limit {
+		t.Fatalf("startGUIJob() took %s with a hung launchctl, limit %s", took, limit)
+	}
+	os.RemoveAll(unknown.dir)
+}
+
+// Playing a saved file bootstraps a second GUI job after say has finished. If
+// that bootstrap times out, the lock must outlive the wait that reported it.
+func TestStartRoutableSayPlaybackKeepsLockWhenSecondJobTimedOut(t *testing.T) {
+	lockPath := useTestSpeechLock(t)
+	useTestServer(t)
+	originalRetry := guiRemoveRetryInterval
+	guiRemoveRetryInterval = 400 * time.Millisecond
+	t.Cleanup(func() { guiRemoveRetryInterval = originalRetry })
+	fake := useFakeLaunchd(t, launchdNotFound)
+	unknown := &guiOutcomeUnknownError{label: "com.blacktop.mcp-tts.1.2", dir: t.TempDir(), state: guiJobPresent}
+	fakeGUIJobs(t, nil, unknown, nil)
+
+	if err := startRoutableSayPlayback(context.Background(), []string{"--rate", "200"}, "hello", ""); err != nil {
+		t.Fatalf("startRoutableSayPlayback() err = %v, want nil: the first job started", err)
+	}
+	time.Sleep(150 * time.Millisecond)
+	if !speechLockHeld(lockPath) {
+		t.Fatal("speech lock was released while the timed-out GUI job might still be speaking")
+	}
+	playbackWG.Wait()
+	requireSpeechLockFree(t, lockPath)
+	if fake.count("bootout") == 0 {
+		t.Fatalf("launchctl calls = %v, want the unremoved job retried", fake.calls)
 	}
 }

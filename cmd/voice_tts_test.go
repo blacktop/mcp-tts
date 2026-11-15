@@ -5,19 +5,42 @@ import (
 	"encoding/json"
 	"errors"
 	"maps"
+	"os"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/blacktop/mcp-tts/internal/speechlock"
 )
+
+func useVoiceTTSSupport(t *testing.T, supported bool) {
+	t.Helper()
+	original := voiceTTSSupported
+	voiceTTSSupported = supported
+	t.Cleanup(func() { voiceTTSSupported = original })
+}
+
+func TestRegisterVoiceTTSToolSkippedWhereUnsupported(t *testing.T) {
+	originalLookPath := voiceSayLookPath
+	t.Cleanup(func() { voiceSayLookPath = originalLookPath })
+	voiceSayLookPath = func(string) (string, error) { return "/test/bin/voice-say", nil }
+	useVoiceTTSSupport(t, false)
+
+	_, tools := listedTools(t, true)
+	assert.Equal(t, []string{"existing_tool"}, toolNames(tools),
+		"voice_tts must not be offered where its playback cannot be serialized")
+}
 
 func TestRegisterVoiceTTSToolPATHGate(t *testing.T) {
 	originalLookPath := voiceSayLookPath
 	t.Cleanup(func() {
 		voiceSayLookPath = originalLookPath
 	})
+	useVoiceTTSSupport(t, true)
 
 	baselineJSON, _ := listedTools(t, false)
 
@@ -70,14 +93,14 @@ func TestRegisterVoiceTTSToolPATHGate(t *testing.T) {
 func TestVoiceTTSToolInvocation(t *testing.T) {
 	originalLookPath := voiceSayLookPath
 	originalRunner := voiceSayRunner
-	originalLock := voiceTTSLock
 	originalSuppress := suppressSpeakingOutput
 	t.Cleanup(func() {
 		voiceSayLookPath = originalLookPath
 		voiceSayRunner = originalRunner
-		voiceTTSLock = originalLock
 		suppressSpeakingOutput = originalSuppress
 	})
+	lockPath := useTestSpeechLock(t)
+	useVoiceTTSSupport(t, true)
 
 	const binaryPath = "/test/bin/voice-say"
 	voiceSayLookPath = func(string) (string, error) {
@@ -85,19 +108,15 @@ func TestVoiceTTSToolInvocation(t *testing.T) {
 	}
 
 	var (
-		lockAcquired bool
-		lockReleased bool
-		gotPath      string
-		gotArgs      []string
-		gotText      string
+		lockHeldWhileSpeaking bool
+		gotLock               *speechlock.Lock
+		gotPath               string
+		gotArgs               []string
+		gotText               string
 	)
-	voiceTTSLock = func(context.Context) (func(), error) {
-		lockAcquired = true
-		return func() {
-			lockReleased = true
-		}, nil
-	}
-	voiceSayRunner = func(_ context.Context, path string, args []string, text string) error {
+	voiceSayRunner = func(_ context.Context, path string, args []string, text string, lock *speechlock.Lock) error {
+		lockHeldWhileSpeaking = speechLockHeld(lockPath)
+		gotLock = lock
 		gotPath = path
 		gotArgs = slices.Clone(args)
 		gotText = text
@@ -126,8 +145,9 @@ func TestVoiceTTSToolInvocation(t *testing.T) {
 	assert.False(t, result.IsError)
 	assert.Equal(t, "Speaking: Local speech", extractTextFromMCPResult(result))
 
-	assert.True(t, lockAcquired)
-	assert.True(t, lockReleased)
+	assert.True(t, lockHeldWhileSpeaking, "voice-say must run under the speech lock")
+	assert.NotNil(t, gotLock, "voice-say must be handed the lock to inherit")
+	requireSpeechLockFree(t, lockPath)
 	assert.Equal(t, binaryPath, gotPath)
 	assert.Equal(t, []string{
 		"--quiet",
@@ -231,19 +251,9 @@ func TestVoiceSayArgs(t *testing.T) {
 
 func TestCallVoiceTTSCommandFailure(t *testing.T) {
 	originalRunner := voiceSayRunner
-	originalLock := voiceTTSLock
-	t.Cleanup(func() {
-		voiceSayRunner = originalRunner
-		voiceTTSLock = originalLock
-	})
-
-	released := false
-	voiceTTSLock = func(context.Context) (func(), error) {
-		return func() {
-			released = true
-		}, nil
-	}
-	voiceSayRunner = func(context.Context, string, []string, string) error {
+	t.Cleanup(func() { voiceSayRunner = originalRunner })
+	lockPath := useTestSpeechLock(t)
+	voiceSayRunner = func(context.Context, string, []string, string, *speechlock.Lock) error {
 		return errors.New("model failed to load")
 	}
 
@@ -251,28 +261,41 @@ func TestCallVoiceTTSCommandFailure(t *testing.T) {
 	require.NotNil(t, result)
 	assert.True(t, result.IsError)
 	assert.Contains(t, extractTextFromMCPResult(result), "voice-say failed: model failed to load")
-	assert.True(t, released)
+	requireSpeechLockFree(t, lockPath)
+}
+
+func TestCallVoiceTTSReportsBusySpeechLock(t *testing.T) {
+	originalRunner := voiceSayRunner
+	t.Cleanup(func() { voiceSayRunner = originalRunner })
+	lockPath := useTestSpeechLock(t)
+	useAdmissionTimeout(t, 150*time.Millisecond)
+	holdSpeechLock(t, lockPath, "openai_tts")
+	runnerCalled := false
+	voiceSayRunner = func(context.Context, string, []string, string, *speechlock.Lock) error {
+		runnerCalled = true
+		return nil
+	}
+
+	result := callVoiceTTS(context.Background(), "/test/bin/voice-say", VoiceTTSParams{Text: "hello"})
+	require.NotNil(t, result)
+	assert.True(t, result.IsError)
+	assert.Contains(t, extractTextFromMCPResult(result), "speech is busy")
+	assert.False(t, runnerCalled, "voice-say must not start while other speech holds the lock")
 }
 
 func TestCallVoiceTTSRejectsNoPlay(t *testing.T) {
 	originalRunner := voiceSayRunner
-	originalLock := voiceTTSLock
 	originalOutputDir := outputDir
 	originalNoPlay := noPlay
 	t.Cleanup(func() {
 		voiceSayRunner = originalRunner
-		voiceTTSLock = originalLock
 		outputDir = originalOutputDir
 		noPlay = originalNoPlay
 	})
+	lockPath := useTestSpeechLock(t)
 
-	lockCalled := false
 	runnerCalled := false
-	voiceTTSLock = func(context.Context) (func(), error) {
-		lockCalled = true
-		return func() {}, nil
-	}
-	voiceSayRunner = func(context.Context, string, []string, string) error {
+	voiceSayRunner = func(context.Context, string, []string, string, *speechlock.Lock) error {
 		runnerCalled = true
 		return nil
 	}
@@ -283,7 +306,8 @@ func TestCallVoiceTTSRejectsNoPlay(t *testing.T) {
 	require.NotNil(t, result)
 	assert.True(t, result.IsError)
 	assert.Contains(t, extractTextFromMCPResult(result), "voice_tts cannot run with --no-play")
-	assert.False(t, lockCalled)
+	_, statErr := os.Stat(lockPath)
+	assert.True(t, os.IsNotExist(statErr), "a rejected call must not touch the speech lock")
 	assert.False(t, runnerCalled)
 }
 

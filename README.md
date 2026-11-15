@@ -102,9 +102,16 @@ For Codex, append `"REX_SESSION"`, `"REX_BLOCK"`, and `"REX_SERVER"` to the exis
 
 ### Sequential vs Concurrent TTS
 
-By default, the TTS server enforces sequential speech operations - only one TTS request can play audio at a time. This prevents multiple agents from speaking simultaneously and creating an unintelligible cacophony. Subsequent requests will wait in a queue until the current speech completes.
+By default, the TTS server enforces sequential speech operations - only one TTS request can play audio at a time. This prevents multiple agents from speaking simultaneously and creating an unintelligible cacophony. Subsequent requests wait their turn until the current speech completes.
 
-**Multi-Instance Protection**: The mutex works both within a single MCP server process and across multiple Claude Desktop instances. When running multiple Claude Desktop terminals, they coordinate via a system-wide file lock to prevent overlapping speech.
+**Multi-Instance Protection**: Every mcp-tts process of a user shares one speech lock, a kernel file lock on `speech.lock` in the `mcp-tts` folder of the user cache directory (`~/Library/Caches` on macOS, `%LocalAppData%` on Windows). The kernel releases it when its last holder exits, including a player that outlives its server.
+
+- A request waits up to 45 seconds for its turn. After that the tool returns a "speech is busy" error instead of waiting forever. The error names the lock's recorded holder; that record says who held the lock, not why speech was delayed. Turns are not handed out in arrival order.
+- Each utterance plays in its own child process (`afplay`, `say` or `voice-say` on macOS; a hidden `mcp-tts play` process on Windows) with a time budget based on the audio's length, capped at 15 minutes. A player that overruns its budget is terminated, then killed. If it still cannot be reaped within five seconds, the server reports failure and returns control; a surviving player retains the speech lock, so later requests time out instead of overlapping it. Such a player can require manual intervention.
+- If a server is killed while speaking, its player keeps the lock until it stops making sound (macOS) or is ended with the server (Windows), so the next speaker does not talk over it. On macOS this covers players the server starts directly. Speech routed through a GUI login session from a background session is not covered: a server killed mid-speech there can still be talked over.
+- On macOS, the server attempts a short stack sample of an overrunning player in `~/Library/Caches/mcp-tts/incidents/` (the newest ten are kept; they contain no speech text). Sampling is best effort and never delays termination.
+
+**Upgrading**: restart every MCP client after upgrading. Servers from v0.1.49 and earlier use a different lock in `/tmp`. They keep running the old code until restarted and do not coordinate with the new lock, so old and new servers can speak over each other.
 
 To allow concurrent TTS operations (multiple speeches playing simultaneously):
 

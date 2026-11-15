@@ -18,7 +18,13 @@ on:
 jobs:
 
   build:
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      CGO_ENABLED: "0"
     steps:
     - uses: actions/checkout@v7
 
@@ -28,7 +34,25 @@ jobs:
         go-version-file: "go.mod"
 
     - name: Build
-      run: CGO_ENABLED=0 go build -v ./...
+      run: go build -v ./...
+
+    - name: Vet
+      run: go vet ./...
 
     - name: Test
-      run: CGO_ENABLED=0 go test -v ./...
+      run: go test -v ./...
+
+  race:
+    runs-on: macos-latest
+    env:
+      CGO_ENABLED: "1"
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Set up Go
+      uses: actions/setup-go@v7
+      with:
+        go-version-file: "go.mod"
+
+    - name: Test with the race detector
+      run: go test -race ./internal/... ./cmd/...

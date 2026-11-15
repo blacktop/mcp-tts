@@ -7,10 +7,14 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/blacktop/mcp-tts/internal/playback"
+	"github.com/blacktop/mcp-tts/internal/speechlock"
 )
 
 func rexTestContext(out io.Writer) context.Context {
@@ -75,8 +79,11 @@ func TestRexTabLabelRequiresControllingTerminal(t *testing.T) {
 	defer closeStatus()
 	require.Nil(t, ctx.Value(rexStatusKey{}), "inherited IDs alone must not enable status or tab relabeling")
 	serverCtx = ctx
+	useStandInPlayers(t, []string{"ok"})
+	proc, err := startPlayback(playback.Spec{Label: "no-tty-test", Budget: 10 * time.Second})
+	require.NoError(t, err)
 	played := make(chan struct{}, 1)
-	require.NoError(t, playInBackground("no-tty-test", func(context.Context) { played <- struct{}{} }))
+	detachPlayback("no-tty-test", proc, func() { played <- struct{}{} })
 	playbackWG.Wait()
 	select {
 	case <-played:
@@ -85,8 +92,27 @@ func TestRexTabLabelRequiresControllingTerminal(t *testing.T) {
 	}
 }
 
+// lockedBuffer is a terminal stand-in that a test can read while detached
+// playback is still writing to it.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
 func TestRexSpeakingFollowsDetachedPlayback(t *testing.T) {
-	var out bytes.Buffer
+	var out lockedBuffer
 	ctx, cancel := context.WithCancel(rexTestContext(&out))
 	previousCtx, previousSequential := serverCtx, sequentialTTS
 	serverCtx, sequentialTTS = ctx, false
@@ -96,16 +122,12 @@ func TestRexSpeakingFollowsDetachedPlayback(t *testing.T) {
 		serverCtx, sequentialTTS = previousCtx, previousSequential
 	})
 
-	started := make(chan struct{})
-	require.NoError(t, playInBackground("test", func(ctx context.Context) {
-		close(started)
-		<-ctx.Done()
-	}))
-	select {
-	case <-started:
-	case <-time.After(5 * time.Second):
-		t.Fatal("playback did not start")
-	}
+	useStandInPlayers(t, []string{"hang"})
+	proc, err := startPlayback(playback.Spec{Label: "test", Budget: time.Minute})
+	require.NoError(t, err)
+	detachPlayback("test", proc, func() {})
+	require.Eventually(t, func() bool { return out.String() != "" }, 5*time.Second, 10*time.Millisecond,
+		"playback did not report that it is speaking")
 	require.Len(t, rexTestReports(t, out.String()), 1, "returning to the MCP caller must not clear active playback")
 	cancel()
 	playbackWG.Wait()
@@ -115,20 +137,20 @@ func TestRexSpeakingFollowsDetachedPlayback(t *testing.T) {
 }
 
 func TestRexVoiceCleanup(t *testing.T) {
-	previousRunner, previousLock, previousNoPlay, previousOutputDir := voiceSayRunner, voiceTTSLock, noPlay, outputDir
+	previousRunner, previousNoPlay, previousOutputDir := voiceSayRunner, noPlay, outputDir
 	t.Cleanup(func() {
-		voiceSayRunner, voiceTTSLock, noPlay = previousRunner, previousLock, previousNoPlay
+		voiceSayRunner, noPlay = previousRunner, previousNoPlay
 		outputDir = previousOutputDir
 	})
 	outputDir = t.TempDir()
-	voiceTTSLock = func(context.Context) (func(), error) { return func() {}, nil }
+	useTestSpeechLock(t)
 	for _, outcome := range []string{"success", "failure", "cancel", "save-only"} {
 		t.Run(outcome, func(t *testing.T) {
 			var out bytes.Buffer
 			ctx, cancel := context.WithCancel(rexTestContext(&out))
 			defer cancel()
 			noPlay = outcome == "save-only"
-			voiceSayRunner = func(context.Context, string, []string, string) error {
+			voiceSayRunner = func(context.Context, string, []string, string, *speechlock.Lock) error {
 				require.Len(t, rexTestReports(t, out.String()), 1)
 				switch outcome {
 				case "failure":

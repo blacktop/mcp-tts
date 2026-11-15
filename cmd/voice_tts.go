@@ -26,10 +26,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"runtime"
 	"strings"
 
 	"github.com/charmbracelet/log"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/blacktop/mcp-tts/internal/playback"
+	"github.com/blacktop/mcp-tts/internal/speechlock"
 )
 
 const voiceSayBinary = "voice-say"
@@ -37,7 +41,10 @@ const voiceSayBinary = "voice-say"
 var (
 	voiceSayLookPath = exec.LookPath
 	voiceSayRunner   = runVoiceSayCommand
-	voiceTTSLock     = acquireGlobalTTSLock
+	// voiceTTSSupported is false on Windows. voice-say runs MLX models and
+	// exists only for macOS, and on Windows speech is serialized by the hidden
+	// player, which a voice-say child would bypass.
+	voiceTTSSupported = runtime.GOOS != "windows"
 )
 
 type VoiceTTSParams struct {
@@ -85,6 +92,9 @@ func buildVoiceTTSSchema() json.RawMessage {
 }
 
 func registerVoiceTTSTool(server *mcp.Server) {
+	if !voiceTTSSupported {
+		return
+	}
 	binaryPath, err := voiceSayLookPath(voiceSayBinary)
 	if err != nil || binaryPath == "" {
 		return
@@ -128,19 +138,19 @@ func callVoiceTTS(ctx context.Context, binaryPath string, input VoiceTTSParams) 
 		return errorResult("Error: voice_tts cannot run with --no-play because voice-say does not expose audio-file output")
 	}
 
-	release, err := voiceTTSLock(ctx)
+	lock, err := acquireSpeechLock(ctx, "voice_tts")
 	if err != nil {
 		if ctx.Err() != nil {
 			return textResult("Request cancelled")
 		}
-		return errorResult(fmt.Sprintf("Error: Failed to acquire TTS lock: %v", err))
+		return errorResult(fmt.Sprintf("Error: %v", err))
 	}
-	defer release()
+	defer lock.Release()
 	stopSpeaking := beginRexSpeaking(ctx)
 	defer stopSpeaking()
 
 	log.Debug("Voice TTS tool called", "path", binaryPath, "args", args)
-	if err := voiceSayRunner(ctx, binaryPath, args, input.Text); err != nil {
+	if err := voiceSayRunner(ctx, binaryPath, args, input.Text, lock); err != nil {
 		if ctx.Err() != nil {
 			return textResult("Request cancelled")
 		}
@@ -184,15 +194,21 @@ func voiceSayArgs(input VoiceTTSParams) ([]string, error) {
 	return args, nil
 }
 
-func runVoiceSayCommand(ctx context.Context, binaryPath string, args []string, text string) error {
-	command := exec.CommandContext(ctx, binaryPath, args...)
-	command.Stdin = strings.NewReader(text)
-	output, err := command.CombinedOutput()
-	if err == nil {
-		return nil
+// runVoiceSayCommand runs voice-say to completion under the speech lock and
+// returns its failure, with what it printed. The request context ends it: a
+// cancelled voice_tts call stops speaking.
+func runVoiceSayCommand(ctx context.Context, binaryPath string, args []string, text string, lock *speechlock.Lock) error {
+	proc, err := startPlayback(playback.Spec{
+		Label:    "voice_tts",
+		Path:     binaryPath,
+		Args:     args,
+		Stdin:    strings.NewReader(text),
+		Budget:   playback.BudgetForVoice(len(text)),
+		Lock:     lock,
+		Diagnose: playbackDiagnostic(),
+	})
+	if err != nil {
+		return err
 	}
-	if detail := strings.TrimSpace(string(output)); detail != "" {
-		return fmt.Errorf("%w: %s", err, detail)
-	}
-	return err
+	return proc.Wait(ctx)
 }

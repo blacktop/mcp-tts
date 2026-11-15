@@ -23,7 +23,7 @@ const (
 func currentSessionMode() (sessionMode, string) { return sessionAqua, "" }
 
 // sessionModeFn mirrors the darwin seam so shared code in root.go compiles. On
-// non-darwin platforms it always reports sessionAqua (in-process audio).
+// non-darwin platforms it always reports sessionAqua (no GUI routing).
 var sessionModeFn = currentSessionMode
 
 func headlessAudioError(string) string { return "" }
@@ -32,8 +32,12 @@ func guiSayPlay(context.Context, []string, string, string, bool) error {
 	return errGUIUnsupported
 }
 
-func startRoutableSayPlayback(_ []string, _, _ string) error { return errGUIUnsupported }
+func startRoutableSayPlayback(context.Context, []string, string, string) error {
+	return errGUIUnsupported
+}
 
-func routeCloudPlayback(_, _ string, _ func() ([]byte, error)) (bool, error) { return false, nil }
+func routeCloudPlayback(context.Context, string, string, func() ([]byte, error)) (bool, error) {
+	return false, nil
+}
 
 func cleanupStaleGUIJobs() {}

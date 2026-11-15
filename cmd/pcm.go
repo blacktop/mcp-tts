@@ -1,3 +1,5 @@
+//go:build !darwin
+
 /*
 Copyright © 2025 blacktop
 
@@ -19,13 +21,15 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
+
 package cmd
 
 import (
 	"github.com/gopxl/beep/v2"
 )
 
-// PCMStream implements beep.Streamer for playing raw 16-bit little-endian PCM audio data
+// PCMStream implements beep.Streamer for the hidden player, which plays raw
+// 16-bit little-endian PCM audio data
 type PCMStream struct {
 	data       []byte
 	sampleRate beep.SampleRate
