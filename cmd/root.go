@@ -774,6 +774,8 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			client, err := genai.NewClient(ctx, &genai.ClientConfig{
 				APIKey:  apiKey,
 				Backend: genai.BackendGeminiAPI,
+				// genai v1.78+ defaults to the v1 API, which rejects speechConfig.
+				HTTPOptions: genai.HTTPOptions{APIVersion: "v1beta"},
 			})
 			if err != nil {
 				log.Error("Failed to create Google AI client", "error", err)
