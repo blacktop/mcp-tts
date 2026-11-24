@@ -500,7 +500,12 @@ func killGUIJob(label string) {
 func startGUISay(
 	ctx context.Context, baseArgs []string, text, savedPath string, play bool,
 ) (wait func(context.Context) error, cleanup func(), err error) {
-	txtPath, removeTxt, err := writeTempFile("mcp-tts-say-*.txt", []byte(text))
+	speaksDirectly := savedPath == "" && play
+	spoken := text
+	if speaksDirectly {
+		spoken = sayVolumeText(text)
+	}
+	txtPath, removeTxt, err := writeTempFile("mcp-tts-say-*.txt", []byte(spoken))
 	if err != nil {
 		return nil, nil, fmt.Errorf("preparing say text for GUI routing: %w", err)
 	}
@@ -512,7 +517,7 @@ func startGUISay(
 	sayArgs = append(sayArgs, "-f", txtPath)
 
 	stopSpeaking := func() {}
-	if savedPath == "" && play {
+	if speaksDirectly {
 		stopSpeaking = beginRexSpeaking(ctx)
 	}
 	handle, err := startGUIJobFn(ctx, sayBinPath, sayArgs)
@@ -530,7 +535,7 @@ func startGUISay(
 		if savedPath != "" && play {
 			stopSavedSpeech := beginRexSpeaking(waitCtx)
 			defer stopSavedSpeech()
-			return runInGUISession(waitCtx, afplayBinPath, []string{savedPath})
+			return runInGUISession(waitCtx, afplayBinPath, afplayArgs(savedPath))
 		}
 		return nil
 	}
@@ -598,7 +603,7 @@ func playViaGUI(ctx context.Context, label, ext string, audioData []byte) error 
 		return err
 	}
 	stopSpeaking := beginRexSpeaking(serverCtx)
-	handle, err := startGUIJobFn(serverCtx, afplayBinPath, []string{path})
+	handle, err := startGUIJobFn(serverCtx, afplayBinPath, afplayArgs(path))
 	if err != nil {
 		stopSpeaking()
 		settleGUIStartFailure(err, func() {

@@ -336,7 +336,7 @@ func TestStartSayPlaybackPlaysSavedFileUnderSameLock(t *testing.T) {
 	started := players.started()
 	require.Len(t, started, 2, "say renders the file, then afplay plays it")
 	assert.Equal(t, "/usr/bin/afplay", started[1].Path)
-	assert.Equal(t, []string{"/tmp/out.aiff"}, started[1].Args)
+	assert.Equal(t, []string{"-v", "0.5", "/tmp/out.aiff"}, started[1].Args)
 	assert.Same(t, started[0].Lock, started[1].Lock, "the saved file must play under the lock say took")
 }
 

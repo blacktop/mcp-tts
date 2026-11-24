@@ -34,8 +34,9 @@ func TestStartClipPlaysUnderLockAndCleansUp(t *testing.T) {
 	assert.NotNil(t, spec.Lock, "afplay must inherit the speech lock")
 	assert.NotNil(t, spec.Diagnose, "an overrunning player must be sampled")
 
-	require.Len(t, spec.Args, 1)
-	audioPath := spec.Args[0]
+	require.Len(t, spec.Args, 3)
+	assert.Equal(t, []string{"-v", "0.5"}, spec.Args[:2], "afplay must play at the configured volume")
+	audioPath := spec.Args[2]
 	assert.Equal(t, ".mp3", filepath.Ext(audioPath))
 	data, err := os.ReadFile(audioPath)
 	require.NoError(t, err)
@@ -54,7 +55,8 @@ func TestStartClipWrapsPCMInWAV(t *testing.T) {
 	players := useStandInPlayers(t, []string{"sleep", "300ms"})
 
 	require.NoError(t, startClip(context.Background(), testClip(clipPCM)))
-	audioPath := players.started()[0].Args[0]
+	args := players.started()[0].Args
+	audioPath := args[len(args)-1]
 	assert.Equal(t, ".wav", filepath.Ext(audioPath))
 	data, err := os.ReadFile(audioPath)
 	require.NoError(t, err)
@@ -71,7 +73,8 @@ func TestStartClipSurfacesImmediatePlayerFailure(t *testing.T) {
 	require.ErrorContains(t, err, "failed to start playback")
 	require.ErrorContains(t, err, "AudioFileOpen failed")
 	requireSpeechLockFree(t, path)
-	_, statErr := os.Stat(players.started()[0].Args[0])
+	args := players.started()[0].Args
+	_, statErr := os.Stat(args[len(args)-1])
 	assert.True(t, os.IsNotExist(statErr), "temp audio file must be removed after a failed start")
 }
 

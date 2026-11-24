@@ -101,6 +101,7 @@ Transform text for speech:
 - Replace URLs with “the link in chat.”
 - Replace long lists with a count and the most important item.
 - Expand ambiguous abbreviations when pronunciation matters.
+- Drop double square brackets. `say` reads `[[...]]` as a speech command rather than text.
 - Use calm, direct language; do not dramatize failures.
 
 ## Choose a TTS tool
@@ -116,6 +117,8 @@ Use only tools present in the current MCP tool catalog. Do not probe `PATH`, cre
 Do not ask the user to choose a provider merely because several tools are exposed—the privacy-preserving, zero-API-token balanced local behavior is the default. Ask once only when the user requests a cloud voice without naming a provider, or when no local tool is available, at least one cloud tool is exposed, and spoken output is still desired. When the user states a provider preference or priority order, update the project configuration while preserving unrelated fields. Keep an explicitly one-off request session-local.
 
 Treat the live MCP input schema as authoritative. Read [references/providers.md](references/providers.md) before selecting non-default parameters, applying fallback behavior, or honoring an existing provider configuration.
+
+Loudness is a server setting (`MCP_TTS_VOLUME`, default `0.5`), not a tool argument. When the user says speech is too loud or too quiet, read the playback volume section of [references/providers.md](references/providers.md) before answering. Neither the spoken text nor the system volume is the right place to fix it.
 
 For optional per-project voice identity explicitly requested by the user, also read [references/voice-pools.json](references/voice-pools.json).
 

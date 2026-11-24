@@ -144,6 +144,22 @@ mcp-tts --suppress-speaking-output
 
 When enabled, tools return "Speech completed" instead of echoing the spoken text.
 
+### Playback Volume
+
+Speech plays at half volume by default (`0.5`). Speech voices are rendered close to full scale, so at full amplitude they play louder than most other audio at the same system volume. Set any value above 0 and at most 1:
+
+**Environment Variable:**
+```bash
+export MCP_TTS_VOLUME=0.3
+```
+
+**Command Line Flag:**
+```bash
+mcp-tts --volume 0.3
+```
+
+`1` is full level. The cloud voices pass the value to their player (`afplay` on macOS). Below `1`, `say_tts` passes it to `say` as an embedded `[[volm]]` command, which voices apply differently: at `0.5`, Premium voices drop about 6 dB, older voices such as Samantha about 12 dB, and Siri voices not at all. `voice_tts` ignores the setting, because `voice-say` plays its own audio and has no volume option. Saved audio files keep full level.
+
 ### Saving Audio to Disk
 
 Save TTS audio output to files instead of (or in addition to) playing them:
@@ -207,6 +223,7 @@ Flags:
       --sequential-tts             Enforce sequential TTS (prevent concurrent speech) (default true)
       --suppress-speaking-output   Suppress 'Speaking:' text output
   -v, --verbose                    Enable verbose debug logging
+      --volume float               Playback volume, above 0 and at most 1; voice_tts ignores it (env: MCP_TTS_VOLUME) (default 0.5)
 ```
 
 ### Configuration
@@ -227,7 +244,8 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
         "OPENAI_API_KEY": "********",
         "OPENAI_TTS_INSTRUCTIONS": "Speak in a cheerful and positive tone",
         "MCP_TTS_SUPPRESS_SPEAKING_OUTPUT": "true",
-        "MCP_TTS_ALLOW_CONCURRENT": "false"
+        "MCP_TTS_ALLOW_CONCURRENT": "false",
+        "MCP_TTS_VOLUME": "0.5"
       }
     }
   }
@@ -288,6 +306,7 @@ Or manually add to `~/.gemini/settings.json` (or `.gemini/settings.json` in proj
 - `MCP_TTS_SUPPRESS_SPEAKING_OUTPUT`: Set to "true" to suppress "Speaking:" output (optional)
 - `MCP_TTS_ALLOW_CONCURRENT`: Set to "true" to allow concurrent TTS operations (optional, defaults to sequential)
 - `MCP_TTS_OUTPUT_DIR`: Directory to save audio files (optional)
+- `MCP_TTS_VOLUME`: Playback volume, above 0 and at most 1 (also `--volume`; optional, default 0.5). `voice_tts` ignores it.
 - `MCP_TTS_NO_PLAY`: Set to "true" to skip playback when saving (optional, requires `MCP_TTS_OUTPUT_DIR`)
 - `MCP_TTS_ELICIT`: Set to "true" to enable interactive elicitation prompts (also `--elicit`; optional, default off). When off, tools use explicit arguments/defaults without prompting — recommended for agent use.
 

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -318,6 +319,12 @@ func TestRouteCloudPlaybackRoutableSuccessDetaches(t *testing.T) {
 	withTestServerCtx(t)
 	var started []string
 	fakeGUIJobs(t, nil, nil, &started)
+	start := startGUIJobFn
+	var args []string
+	startGUIJobFn = func(ctx context.Context, program string, a []string) (guiJobHandle, error) {
+		args = a
+		return start(ctx, program, a)
+	}
 
 	handled, err := routeCloudPlayback(context.Background(), "openai_tts", "mp3", func() ([]byte, error) { return []byte("data"), nil })
 	if !handled || err != nil {
@@ -326,6 +333,9 @@ func TestRouteCloudPlaybackRoutableSuccessDetaches(t *testing.T) {
 	playbackWG.Wait()
 	if len(started) != 1 || started[0] != afplayBinPath {
 		t.Fatalf("routeCloudPlayback(routable) started = %v, want one afplay job", started)
+	}
+	if len(args) != 3 || !slices.Equal(args[:2], []string{"-v", "0.5"}) {
+		t.Fatalf("afplay args = %q, want the configured volume before the file", args)
 	}
 }
 
@@ -386,6 +396,51 @@ func TestGUISayPlaySaveThenAfplaySequence(t *testing.T) {
 	want := []string{sayBinPath, afplayBinPath}
 	if len(started) != len(want) || started[0] != want[0] || started[1] != want[1] {
 		t.Fatalf("guiSayPlay() started = %v, want %v (say then afplay)", started, want)
+	}
+}
+
+func TestGUISaySetsVolumeOnlyWhenSayPlays(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		savedPath  string
+		play       bool
+		wantText   string
+		wantAfplay []string
+	}{
+		{name: "say plays", play: true, wantText: "[[volm 0.5]] hi"},
+		{name: "afplay plays the saved file", savedPath: "/tmp/out.aiff", play: true, wantText: "hi",
+			wantAfplay: []string{"-v", "0.5", "/tmp/out.aiff"}},
+		{name: "save only", savedPath: "/tmp/out.aiff", wantText: "hi"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fakeGUIJobs(t, nil, nil, nil)
+			start := startGUIJobFn
+			var text string
+			var afplay []string
+			startGUIJobFn = func(ctx context.Context, program string, args []string) (guiJobHandle, error) {
+				switch program {
+				case sayBinPath:
+					data, err := os.ReadFile(args[len(args)-1])
+					if err != nil {
+						t.Fatalf("reading the say text file: %v", err)
+					}
+					text = string(data)
+				case afplayBinPath:
+					afplay = args
+				}
+				return start(ctx, program, args)
+			}
+
+			if err := guiSayPlay(context.Background(), nil, "hi", tc.savedPath, tc.play); err != nil {
+				t.Fatalf("guiSayPlay() err = %v, want nil", err)
+			}
+			if text != tc.wantText {
+				t.Errorf("say text = %q, want %q", text, tc.wantText)
+			}
+			if !slices.Equal(afplay, tc.wantAfplay) {
+				t.Errorf("afplay args = %q, want %q", afplay, tc.wantAfplay)
+			}
+		})
 	}
 }
 

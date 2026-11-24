@@ -1,6 +1,6 @@
 # TTS Provider Reference
 
-Read this file only when selecting non-default tool parameters, applying fallback behavior, or honoring a user-created provider configuration. Treat the current MCP `tools/list` schemas as authoritative if this reference differs.
+Read this file only when selecting non-default tool parameters, applying fallback behavior, honoring a user-created provider configuration, or answering a question about loudness. Treat the current MCP `tools/list` schemas as authoritative if this reference differs.
 
 ## Selection policy
 
@@ -80,6 +80,22 @@ Rules:
 - Use the live MCP schema for current model, voice, speed, and instruction values.
 - On authentication, configuration, quota, or rate-limit failure, disable cloud TTS for the session. Use local speech if available; otherwise remain text-only.
 - An ElevenLabs `402 paid_plan_required` result may mean the configured voice is unavailable on the current plan; do not repeatedly retry it.
+
+## Playback volume
+
+Loudness is a server setting, not a tool argument. The server reads `MCP_TTS_VOLUME` (or the `--volume` flag) once at startup: a value above 0 and at most 1, with a default of `0.5`. No call can change it for one announcement, so do not try:
+
+- Leave `[[volm …]]` and other embedded speech commands out of the text. `say_tts` already adds its own, so a second one would stack on top of the user's setting.
+- Leave the system output volume alone. Turning it down quiets every other app too.
+
+When the user says speech is too loud or too quiet, explain the setting and offer to change it. Edit the `env` block of the mcp-tts entry in their MCP client configuration only when they ask, keep every other entry, and write a plain decimal such as `"0.3"`, because a value the server cannot parse stops it from starting. The new level applies after the MCP connection restarts. If it still has no effect, the installed server may predate the setting; `mcp-tts --help` lists `--volume` when it is supported.
+
+The setting does not reach every voice:
+
+- `voice_tts` always plays at full level. `voice-say` plays its own audio and has no volume option. If the user wants all speech quieter, offer a provider preference that puts `say_tts` first (`local_strategy: priority`), because the balanced default sends about half of all announcements through `voice_tts`.
+- `say_tts` voices honor the setting unevenly. At `0.5`, Premium voices drop about 6 dB, older voices such as Samantha about 12 dB, and Siri voices not at all.
+- Cloud tools pass it to the audio player, so every cloud voice is affected equally.
+- Audio saved with `--output-dir` stays at full level; only playback is scaled.
 
 ## Error classification
 

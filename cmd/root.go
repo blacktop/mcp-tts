@@ -122,6 +122,17 @@ func startSayPlayback(ctx context.Context, playArgs []string, savedPath, text st
 	return nil
 }
 
+// sayArgs completes the say arguments. say speaks the text itself at the
+// configured volume or, when savedPath is set, writes the file at full level;
+// a saved file is played, if at all, through afplay at the configured volume.
+func sayArgs(baseArgs []string, text, savedPath string) []string {
+	playArgs := append([]string{}, baseArgs...)
+	if savedPath != "" {
+		return append(playArgs, "-o", savedPath, text)
+	}
+	return append(playArgs, sayVolumeText(text))
+}
+
 // playSavedSpeech plays an AIFF that `say -o` wrote, under the speech lock the
 // caller already holds.
 func playSavedSpeech(lock *speechlock.Lock, savedPath string, budget time.Duration) {
@@ -131,7 +142,7 @@ func playSavedSpeech(lock *speechlock.Lock, savedPath string, budget time.Durati
 	proc, err := startPlayback(playback.Spec{
 		Label:    "say_tts",
 		Path:     "/usr/bin/afplay",
-		Args:     []string{savedPath},
+		Args:     afplayArgs(savedPath),
 		Budget:   budget,
 		Lock:     lock,
 		Diagnose: playbackDiagnostic(),
@@ -325,6 +336,8 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&outputDir, "output-dir", "", "Save audio files to directory (env: MCP_TTS_OUTPUT_DIR)")
 	rootCmd.PersistentFlags().BoolVar(&noPlay, "no-play", false, "Skip playback, only save (requires --output-dir)")
 	rootCmd.PersistentFlags().BoolVar(&rexTabLabelEnabled, "rex-tab-label", false, "Temporarily prefix the exact Rex tab label with 🔊 during playback")
+	rootCmd.PersistentFlags().Float64Var(&volume, "volume", defaultVolume,
+		"Playback volume, above 0 and at most 1; voice_tts ignores it (env: MCP_TTS_VOLUME)")
 
 	// Check environment variable for suppressing output
 	if os.Getenv("MCP_TTS_SUPPRESS_SPEAKING_OUTPUT") == "true" {
@@ -394,6 +407,10 @@ Designed to be used with the MCP (Model Context Protocol).`,
 		if noPlay && outputDir == "" {
 			return fmt.Errorf("--no-play requires --output-dir to be set")
 		}
+		if err := resolveVolume(cmd.Flags().Changed("volume"), os.Getenv("MCP_TTS_VOLUME")); err != nil {
+			return err
+		}
+		log.Debug("Playback volume", "volume", volume)
 
 		// Validate output directory exists and is a directory
 		if outputDir != "" {
@@ -546,7 +563,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 						}
 						return textResult(formatSaveResult(text, savedPath, false)), nil, nil
 					}
-					saveArgs := append(append([]string{}, args...), "-o", savedPath, text)
+					saveArgs := sayArgs(args, text, savedPath)
 					log.Debug("Saving say audio to file", "path", savedPath, "args", saveArgs)
 					if err := exec.CommandContext(ctx, "/usr/bin/say", saveArgs...).Run(); err != nil {
 						if ctx.Err() != nil {
@@ -579,12 +596,7 @@ Designed to be used with the MCP (Model Context Protocol).`,
 					return textResult(formatSaveResult(text, savedPath, true)), nil, nil
 				}
 
-				playArgs := append([]string{}, args...)
-				if savedPath != "" {
-					playArgs = append(playArgs, "-o", savedPath)
-				}
-				playArgs = append(playArgs, text)
-
+				playArgs := sayArgs(args, text, savedPath)
 				if err := startSayPlayback(ctx, playArgs, savedPath, text); err != nil {
 					if ctx.Err() != nil {
 						return textResult("Say command cancelled"), nil, nil

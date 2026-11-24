@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gopxl/beep/v2"
+	"github.com/gopxl/beep/v2/effects"
 	"github.com/gopxl/beep/v2/mp3"
 	"github.com/gopxl/beep/v2/speaker"
 	"github.com/spf13/cobra"
@@ -46,7 +47,9 @@ var playCmd = &cobra.Command{
 			Label:     playOptions.label,
 			Admission: playOptions.admission,
 			Out:       os.Stdout,
-		}, &beepBackend{path: args[0], format: playOptions.format, sampleRate: playOptions.rate})
+		}, &beepBackend{
+			path: args[0], format: playOptions.format, sampleRate: playOptions.rate, volume: volume,
+		})
 		var busy *playback.BusyError
 		if errors.As(err, &busy) {
 			os.Exit(playerBusyExit)
@@ -69,10 +72,14 @@ type beepBackend struct {
 	path       string
 	format     string
 	sampleRate int
+	volume     float64 // amplitude scale, from --volume
 	streamer   beep.Streamer
 }
 
 func (b *beepBackend) Prepare() error {
+	if err := checkVolume(b.volume); err != nil {
+		return err
+	}
 	data, err := os.ReadFile(b.path)
 	if err != nil {
 		return fmt.Errorf("reading audio file: %w", err)
@@ -94,6 +101,7 @@ func (b *beepBackend) Prepare() error {
 	default:
 		return fmt.Errorf("unsupported audio format %q; expected %s or %s", b.format, clipMP3, clipPCM)
 	}
+	b.streamer = &effects.Gain{Streamer: b.streamer, Gain: b.volume - 1}
 	if err := speaker.Init(rate, rate.N(time.Second/10)); err != nil {
 		return fmt.Errorf("failed to initialize speaker: %w", err)
 	}

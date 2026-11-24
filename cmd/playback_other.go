@@ -54,6 +54,7 @@ func startClip(ctx context.Context, c clip) error {
 			"--label", c.label,
 			"--lock", lockPath,
 			"--admission", admissionTimeout.String(),
+			"--volume", volumeArg(),
 			path,
 		},
 		Admission:    admissionTimeout + playerAdmissionSlack,

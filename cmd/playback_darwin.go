@@ -42,7 +42,7 @@ func startClip(ctx context.Context, c clip) error {
 	proc, err := startPlayback(playback.Spec{
 		Label:         c.label,
 		Path:          afplayBinPath,
-		Args:          []string{path},
+		Args:          afplayArgs(path),
 		Budget:        c.budget,
 		Lock:          lock,
 		StartupWindow: afplayStartupWindow,

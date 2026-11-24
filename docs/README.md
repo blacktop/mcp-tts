@@ -51,6 +51,7 @@ export GOOGLE_AI_API_KEY="your-google-key"
 export OPENAI_TTS_INSTRUCTIONS="Custom voice instructions"
 export ELEVENLABS_VOICE_ID="custom-voice-id"
 export ELEVENLABS_MODEL_ID="custom-model-id"
+export MCP_TTS_VOLUME=0.5               # Playback volume, above 0 and at most 1
 ```
 
 ### **MCP Tools**
