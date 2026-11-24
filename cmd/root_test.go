@@ -444,7 +444,7 @@ func TestOpenAITTSTool(t *testing.T) {
 			params: OpenAITTSParams{
 				Text:  "Hello, speak with echo voice",
 				Voice: new("echo"),
-				Model: new("gpt-4o-audio-preview"),
+				Model: new("gpt-realtime-2.1"),
 				Speed: new(1.5),
 			},
 			expectError:   false,
@@ -639,15 +639,15 @@ func TestParameterValidation(t *testing.T) {
 		}{
 			{"nil speed", nil, true},
 			{"valid speed", new(1.0), true},
-			{"minimum speed", new(0.25), true},
-			{"maximum speed", new(4.0), true},
+			{"minimum speed", new(MinOpenAISpeed), true},
+			{"maximum speed", new(MaxOpenAISpeed), true},
 			{"too slow", new(0.1), false},
-			{"too fast", new(5.0), false},
+			{"too fast", new(1.6), false},
 		}
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				valid := tt.speed == nil || (*tt.speed >= 0.25 && *tt.speed <= 4.0)
+				valid := tt.speed == nil || (*tt.speed >= MinOpenAISpeed && *tt.speed <= MaxOpenAISpeed)
 				assert.Equal(t, tt.valid, valid, "Speed validation mismatch")
 			})
 		}

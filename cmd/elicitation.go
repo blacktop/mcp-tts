@@ -356,7 +356,7 @@ func openAISettingsSchema() map[string]any {
 			"speed": map[string]any{
 				"type":        "number",
 				"title":       "Speed",
-				"description": "0.25-4.0 (default: 1.0)",
+				"description": openAISpeedRange,
 			},
 		},
 	}

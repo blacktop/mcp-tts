@@ -110,11 +110,11 @@ func TestProviderRecommendationArgs(t *testing.T) {
 
 		openAIArgs := providerRecommendationArgs(ProviderOpenAI, "hello", map[string]any{
 			"voice": "verse",
-			"model": "tts-1-hd",
+			"model": "gpt-realtime-2.1",
 			"speed": 1.25,
 		})
 		assert.Equal(t, "verse", openAIArgs["voice"])
-		assert.Equal(t, "tts-1-hd", openAIArgs["model"])
+		assert.Equal(t, "gpt-realtime-2.1", openAIArgs["model"])
 		assert.Equal(t, 1.25, openAIArgs["speed"])
 	})
 }

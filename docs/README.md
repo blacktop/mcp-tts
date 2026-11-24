@@ -112,7 +112,7 @@ All tools support cancellation via MCP `notifications/cancelled` protocol.
   "arguments": {
     "text": "Text to speak",
     "voice": "coral",
-    "model": "gpt-4o-mini-tts",
+    "model": "gpt-realtime-2.1-mini",
     "speed": 1.0,
     "instructions": "Speak clearly and professionally"
   }

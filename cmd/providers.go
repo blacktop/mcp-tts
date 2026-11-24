@@ -22,6 +22,7 @@ THE SOFTWARE.
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"runtime"
 )
@@ -40,8 +41,10 @@ const (
 	DefaultGoogleVoice = "Kore"
 	DefaultGoogleModel = "gemini-3.8-flash-tts"
 	DefaultOpenAIVoice = "alloy"
-	DefaultOpenAIModel = "gpt-4o-mini-tts-2025-12-15"
+	DefaultOpenAIModel = "gpt-realtime-2.1-mini"
 	DefaultOpenAISpeed = 1.0
+	MinOpenAISpeed     = 0.25
+	MaxOpenAISpeed     = 1.5
 	// DefaultElevenLabsVoiceID is "Sarah", a premade voice. Library
 	// (community/professional) voices return 402 for free-tier API keys, so the
 	// default must be a premade voice.
@@ -68,11 +71,15 @@ var (
 	}
 	OpenAIVoices = []string{
 		"alloy", "ash", "ballad", "coral", "echo",
-		"fable", "nova", "onyx", "sage", "shimmer", "verse",
+		"sage", "shimmer", "verse", "marin", "cedar",
 	}
 	OpenAIModels = []string{
-		"gpt-4o-mini-tts-2025-12-15", "tts-1", "tts-1-hd",
+		"gpt-realtime-2.1-mini", "gpt-realtime-2.1",
 	}
+)
+
+var openAISpeedRange = fmt.Sprintf(
+	"%g-%g (default: %.1f)", MinOpenAISpeed, MaxOpenAISpeed, DefaultOpenAISpeed,
 )
 
 type providerOption struct {

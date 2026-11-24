@@ -54,7 +54,7 @@
         "instructions": "Speak calmly and clearly, like outlining a well-organized plan"
       },
       {
-        "voice": "onyx",
+        "voice": "cedar",
         "description": "deep, authoritative",
         "instructions": "Speak with confidence, laying out the roadmap"
       },
@@ -79,7 +79,7 @@
     ],
     "summary": [
       {
-        "voice": "nova",
+        "voice": "marin",
         "description": "bright, accomplished",
         "instructions": "Speak with satisfaction, like wrapping up a job well done"
       },

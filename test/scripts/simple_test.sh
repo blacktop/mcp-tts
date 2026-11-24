@@ -29,7 +29,7 @@ echo "✅ OPENAI_API_KEY is set"
 
 # Create a temporary script for automation
 cat > /tmp/mcp_test_input.txt << 'EOF'
-{"jsonrpc":"2.0","id":777,"method":"tools/call","params":{"name":"openai_tts","arguments":{"text":"This is a test message for OpenAI TTS cancellation functionality. We are generating enough text content to ensure that the audio generation and playback process takes sufficient time to allow for proper testing of the cancellation mechanism. This should provide adequate time to test the cancellation while the audio is actively playing.","voice":"coral","model":"gpt-4o-mini-tts","speed":1.0}}}
+{"jsonrpc":"2.0","id":777,"method":"tools/call","params":{"name":"openai_tts","arguments":{"text":"This is a test message for OpenAI TTS cancellation functionality. We are generating enough text content to ensure that the audio generation and playback process takes sufficient time to allow for proper testing of the cancellation mechanism. This should provide adequate time to test the cancellation while the audio is actively playing.","voice":"coral","model":"gpt-realtime-2.1-mini","speed":1.0}}}
 EOF
 
 cat > /tmp/mcp_test_cancel.txt << 'EOF'

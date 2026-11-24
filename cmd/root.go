@@ -42,8 +42,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/log"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/openai/openai-go"
-	"github.com/openai/openai-go/option"
+	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/option"
 	"github.com/spf13/cobra"
 	"google.golang.org/genai"
 )
@@ -293,9 +293,9 @@ type GoogleTTSParams struct {
 
 type OpenAITTSParams struct {
 	Text         string   `json:"text" mcp:"The text to convert to speech using OpenAI TTS"`
-	Voice        *string  `json:"voice,omitempty,omitzero" mcp:"Voice to use (alloy, ash, ballad, coral, echo, fable, nova, onyx, sage, shimmer, verse; default: 'alloy')"`
-	Model        *string  `json:"model,omitempty,omitzero" mcp:"TTS model to use (gpt-4o-mini-tts-2025-12-15, tts-1, tts-1-hd; default: 'gpt-4o-mini-tts-2025-12-15')"`
-	Speed        *float64 `json:"speed,omitempty,omitzero" mcp:"Speech speed (0.25-4.0, default: 1.0)"`
+	Voice        *string  `json:"voice,omitempty,omitzero" mcp:"Voice to use"`
+	Model        *string  `json:"model,omitempty,omitzero" mcp:"Realtime model to use"`
+	Speed        *float64 `json:"speed,omitempty,omitzero" mcp:"Speech speed"`
 	Instructions *string  `json:"instructions,omitempty,omitzero" mcp:"Instructions for voice modulation and style"`
 }
 
@@ -891,10 +891,10 @@ Designed to be used with the MCP (Model Context Protocol).`,
 
 			speed := DefaultOpenAISpeed
 			if input.Speed != nil {
-				if *input.Speed >= 0.25 && *input.Speed <= 4.0 {
+				if *input.Speed >= MinOpenAISpeed && *input.Speed <= MaxOpenAISpeed {
 					speed = *input.Speed
 				} else {
-					log.Warn("Speed out of range, using default", "provided", *input.Speed, "default", 1.0)
+					log.Warn("Speed out of range, using default", "provided", *input.Speed, "default", DefaultOpenAISpeed)
 				}
 			}
 
@@ -923,36 +923,24 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			}
 			log.Debug("Generating OpenAI TTS audio", logFields...)
 
-			reqParams := openai.AudioSpeechNewParams{
-				Model: openai.SpeechModel(model),
-				Input: text,
-				Voice: openai.AudioSpeechNewParamsVoice(voice),
-			}
-			if speed != 1.0 {
-				reqParams.Speed = openai.Float(speed)
-			}
-			if instructions != "" {
-				reqParams.Instructions = openai.String(instructions)
-			}
-
-			response, err := client.Audio.Speech.New(ctx, reqParams)
+			audioData, err := synthesizeOpenAISpeech(ctx, client, openAISpeechRequest{
+				Model:        model,
+				Voice:        voice,
+				Speed:        speed,
+				Text:         text,
+				Instructions: instructions,
+			})
 			if err != nil {
 				log.Error("Failed to generate OpenAI TTS audio", "error", err)
 				return errorResult(fmt.Sprintf("Error: Failed to generate TTS audio: %v", err)), nil, nil
 			}
-			defer response.Body.Close()
-
-			// Buffer the response body so we can both save and decode it
-			audioData, err := io.ReadAll(response.Body)
-			if err != nil {
-				log.Error("Failed to read OpenAI TTS response", "error", err)
-				return errorResult(fmt.Sprintf("Error: Failed to read response: %v", err)), nil, nil
-			}
 			log.Debug("OpenAI TTS audio data received", "bytes", len(audioData))
 
-			return deliverAudio(ctx, text, audioData, saveMP3, func(ctx context.Context) error {
-				return playMP3(ctx, "openai_tts", text, audioData)
-			})
+			return deliverAudio(ctx, text, audioData,
+				func(d []byte, t string) (string, error) { return saveWAV(d, openAITTSSampleRate, t) },
+				func(ctx context.Context) error {
+					return playPCM(ctx, "openai_tts", text, audioData, openAITTSSampleRate)
+				})
 		})
 
 		// Add interactive TTS tool that uses elicitation to choose provider

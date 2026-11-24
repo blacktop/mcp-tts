@@ -3,5 +3,5 @@
 {"jsonrpc":"2.0","id":3,"method":"tools/list"}
 {"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"openai_tts","arguments":{"text":"Testing default settings with coral voice."}}}
 {"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"openai_tts","arguments":{"text":"Testing echo voice with faster speed.","voice":"echo","speed":1.5}}}
-{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"openai_tts","arguments":{"text":"Testing high-definition model with shimmer voice.","voice":"shimmer","model":"tts-1-hd"}}}
-{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"openai_tts","arguments":{"text":"Testing slower speed with onyx voice.","voice":"onyx","speed":0.8}}}
+{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"openai_tts","arguments":{"text":"Testing the larger model with shimmer voice.","voice":"shimmer","model":"gpt-realtime-2.1"}}}
+{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"openai_tts","arguments":{"text":"Testing slower speed with cedar voice.","voice":"cedar","speed":0.8}}}

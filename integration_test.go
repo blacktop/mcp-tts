@@ -751,7 +751,7 @@ func TestMCPIntegration_TTSInteractiveJSONL(t *testing.T) {
 	assert.Contains(t, text, "User selected OpenAI. Please call openai_tts with arguments:")
 	assert.Contains(t, text, `"text":"Hello from the interactive tts JSONL test."`)
 	assert.Contains(t, text, `"voice":"alloy"`)
-	assert.Contains(t, text, `"model":"gpt-4o-mini-tts-2025-12-15"`)
+	assert.Contains(t, text, `"model":"gpt-realtime-2.1-mini"`)
 	assert.Contains(t, text, `"speed":1`)
 }
 
@@ -1014,7 +1014,7 @@ func TestMCPIntegration_OpenAITTS(t *testing.T) {
 		Text:  "Hello! This is a test of OpenAI's text-to-speech API.",
 		Voice: new("coral"),
 		Speed: new(1.2),
-		Model: new("gpt-4o-mini-tts-2025-12-15"),
+		Model: new("gpt-realtime-2.1-mini"),
 	}
 
 	response, err := runner.callTool(6, "openai_tts", args)

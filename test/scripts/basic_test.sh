@@ -18,4 +18,4 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | timeout 5s go run main.g
 
 echo ""
 echo "Testing simple OpenAI TTS (short text)..."
-echo '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"openai_tts","arguments":{"text":"Hello world test","voice":"coral","model":"gpt-4o-mini-tts"}}}' | timeout 10s go run main.go 
+echo '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"openai_tts","arguments":{"text":"Hello world test","voice":"coral","model":"gpt-realtime-2.1-mini"}}}' | timeout 10s go run main.go 

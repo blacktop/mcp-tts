@@ -103,19 +103,19 @@ func buildOpenAITTSSchema() json.RawMessage {
 			},
 			"voice": map[string]any{
 				"type":        "string",
-				"description": "Voice to use (alloy, ash, ballad, coral, echo, fable, nova, onyx, sage, shimmer, verse; default: 'alloy')",
+				"description": fmt.Sprintf("Voice to use (default: '%s')", DefaultOpenAIVoice),
 				"enum":        OpenAIVoices,
 			},
 			"model": map[string]any{
 				"type":        "string",
-				"description": "TTS model to use (gpt-4o-mini-tts-2025-12-15, tts-1, tts-1-hd; default: 'gpt-4o-mini-tts-2025-12-15')",
+				"description": fmt.Sprintf("Realtime model to use (default: '%s')", DefaultOpenAIModel),
 				"enum":        OpenAIModels,
 			},
 			"speed": map[string]any{
 				"type":        "number",
-				"description": "Speech speed (0.25-4.0, default: 1.0)",
-				"minimum":     0.25,
-				"maximum":     4.0,
+				"description": "Speech speed, " + openAISpeedRange,
+				"minimum":     MinOpenAISpeed,
+				"maximum":     MaxOpenAISpeed,
 			},
 			"instructions": map[string]any{
 				"type":        "string",

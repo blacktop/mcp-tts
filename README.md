@@ -59,27 +59,28 @@ Uses Google's [Gemini TTS models](https://ai.google.dev/gemini-api/docs/speech-g
 
 ### `openai_tts`
 
-Uses OpenAI's [Text-to-Speech API](https://platform.openai.com/docs/guides/text-to-speech) to speak the text with 10 natural-sounding voices:
+Uses OpenAI's [Realtime API](https://developers.openai.com/api/docs/guides/realtime) to speak the text with 10 voices:
 
 - **alloy** (Warm, conversational, modern)
 - **ash** (Confident, assertive, slightly textured)
 - **ballad** (Gentle, melodious, slightly lyrical)
 - **coral** (Cheerful, fresh, upbeat)
 - **echo** (Neutral, calm, balanced)
-- **fable** (Storyteller-like, expressive)
-- **nova** (Clear, precise, slightly formal)
-- **onyx** (Deep, authoritative, resonant)
 - **sage** (Soothing, empathetic, reassuring)
 - **shimmer** (Bright, animated, playful)
 - **verse** (Versatile, expressive)
+- **marin** and **cedar** (the two voices OpenAI recommends for best quality)
 
-Supports three quality models:
-- **gpt-4o-mini-tts** - Default, optimized quality and speed
-- **tts-1** - Standard quality, faster generation  
-- **tts-1-hd** - High definition audio, premium quality
+Supports two models:
+- **gpt-realtime-2.1-mini** - Default
+- **gpt-realtime-2.1** - Larger model
+
+OpenAI retires `tts-1`, `tts-1-hd` and `gpt-4o-mini-tts` on 6 January 2027, so this tool no longer accepts them, nor the `fable`, `nova` and `onyx` voices, which the Realtime API does not offer.
+
+A Realtime model is conversational, so the tool instructs it to read the text word for word. Check the result on text where exact wording matters.
 
 Additional features:
-- Speed control from 0.25x to 4.0x (default: 1.0x)
+- Speed control from 0.25x to 1.5x (default: 1.0x)
 - Custom voice instructions (e.g., "Speak in a cheerful and positive tone") via parameter or `OPENAI_TTS_INSTRUCTIONS` environment variable
 
 ## Configuration
@@ -167,7 +168,7 @@ Files are saved with unique names: `tts_{timestamp}_{hash}.{ext}`
 | Voice | Playback only |
 | ElevenLabs | MP3 |
 | Google TTS | WAV |
-| OpenAI TTS | MP3 |
+| OpenAI TTS | WAV |
 
 ## Getting Started
 
@@ -325,13 +326,11 @@ Or manually add to `~/.gemini/settings.json` (or `.gemini/settings.json` in proj
 
 2025/05/23 19:15:32 INFO Starting MCP server name="Say TTS Service" version=""
 2025/05/23 19:15:32 DEBU OpenAI TTS tool called request="{...}"
-2025/05/23 19:15:32 DEBU Generating OpenAI TTS audio model=tts-1 voice=nova speed=1.2 text="Hello! This is a test of OpenAI's text-to-speech API. I'm using the nova voice at 1.2x speed."
-2025/05/23 19:15:34 DEBU Decoding MP3 stream from OpenAI
-2025/05/23 19:15:34 DEBU Initializing speaker for OpenAI TTS sampleRate=22050
-2025/05/23 19:15:36 INFO Speaking text via OpenAI TTS text="Hello! This is a test of OpenAI's text-to-speech API. I'm using the nova voice at 1.2x speed." voice=nova model=tts-1 speed=1.2
+2025/05/23 19:15:32 DEBU Generating OpenAI TTS audio model=gpt-realtime-2.1-mini voice=coral speed=1.2 text="Hello! This is a test of OpenAI's text-to-speech API. I'm using the coral voice at 1.2x speed."
+2025/05/23 19:15:34 DEBU OpenAI TTS audio data received bytes=288000
 ```
 ```json
-{"jsonrpc":"2.0","id":5,"result":{"content":[{"type":"text","text":"Speaking: Hello! This is a test of OpenAI's text-to-speech API. I'm using the nova voice at 1.2x speed. (via OpenAI TTS with voice nova)"}]}}
+{"jsonrpc":"2.0","id":5,"result":{"content":[{"type":"text","text":"Speaking: Hello! This is a test of OpenAI's text-to-speech API. I'm using the coral voice at 1.2x speed. (via OpenAI TTS with voice coral)"}]}}
 ```
 
 #### Test the mutex behavior with multiple TTS requests
