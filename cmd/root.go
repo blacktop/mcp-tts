@@ -819,15 +819,18 @@ Designed to be used with the MCP (Model Context Protocol).`,
 				return errorResult("Error: No audio data received from Google TTS"), nil, nil
 			}
 
-			audioData := part.InlineData.Data
-			log.Debug("Google TTS audio received", "bytes", len(audioData))
-
-			const googleTTSSampleRate = 24000
+			audioData, sampleRate, err := googleSpeechPCM(part.InlineData)
+			if err != nil {
+				log.Error("Unreadable Google TTS audio", "error", err)
+				return errorResult(fmt.Sprintf("Error: %v", err)), nil, nil
+			}
+			log.Debug("Google TTS audio received",
+				"mimeType", part.InlineData.MIMEType, "bytes", len(audioData), "sampleRate", sampleRate)
 
 			return deliverAudio(ctx, text, audioData,
-				func(d []byte, t string) (string, error) { return saveWAV(d, googleTTSSampleRate, t) },
+				func(d []byte, t string) (string, error) { return saveWAV(d, sampleRate, t) },
 				func(ctx context.Context) error {
-					return playPCM(ctx, "google_tts", text, audioData, googleTTSSampleRate)
+					return playPCM(ctx, "google_tts", text, audioData, sampleRate)
 				},
 			)
 		})
