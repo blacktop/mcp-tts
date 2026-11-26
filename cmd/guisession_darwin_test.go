@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -373,8 +374,8 @@ func TestStartRoutableSayPlaybackSuccessDetaches(t *testing.T) {
 		t.Fatalf("startRoutableSayPlayback() err = %v, want nil", err)
 	}
 	playbackWG.Wait()
-	if len(started) != 1 || started[0] != sayBinPath {
-		t.Fatalf("startRoutableSayPlayback() started = %v, want one say job", started)
+	if want := []string{sayBinPath, afplayBinPath}; !slices.Equal(started, want) {
+		t.Fatalf("startRoutableSayPlayback() started = %v, want %v (say renders, afplay plays)", started, want)
 	}
 }
 
@@ -386,36 +387,20 @@ func TestGUISayPlayBootstrapErrorSurfaces(t *testing.T) {
 	}
 }
 
-func TestGUISayPlaySaveThenAfplaySequence(t *testing.T) {
-	var started []string
-	fakeGUIJobs(t, nil, nil, &started)
-	err := guiSayPlay(context.Background(), []string{"--rate", "200"}, "hi", "/tmp/out.aiff", true)
-	if err != nil {
-		t.Fatalf("guiSayPlay() err = %v, want nil", err)
-	}
-	want := []string{sayBinPath, afplayBinPath}
-	if len(started) != len(want) || started[0] != want[0] || started[1] != want[1] {
-		t.Fatalf("guiSayPlay() started = %v, want %v (say then afplay)", started, want)
-	}
-}
-
-func TestGUISaySetsVolumeOnlyWhenSayPlays(t *testing.T) {
+func TestGUISayRendersThenPlaysAtVolume(t *testing.T) {
 	for _, tc := range []struct {
-		name       string
-		savedPath  string
-		play       bool
-		wantText   string
-		wantAfplay []string
+		name      string
+		savedPath string
+		play      bool
 	}{
-		{name: "say plays", play: true, wantText: "[[volm 0.5]] hi"},
-		{name: "afplay plays the saved file", savedPath: "/tmp/out.aiff", play: true, wantText: "hi",
-			wantAfplay: []string{"-v", "0.5", "/tmp/out.aiff"}},
-		{name: "save only", savedPath: "/tmp/out.aiff", wantText: "hi"},
+		{name: "play", play: true},
+		{name: "save and play", savedPath: "/tmp/out.aiff", play: true},
+		{name: "save only", savedPath: "/tmp/out.aiff"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fakeGUIJobs(t, nil, nil, nil)
 			start := startGUIJobFn
-			var text string
+			var text, rendered string
 			var afplay []string
 			startGUIJobFn = func(ctx context.Context, program string, args []string) (guiJobHandle, error) {
 				switch program {
@@ -425,20 +410,38 @@ func TestGUISaySetsVolumeOnlyWhenSayPlays(t *testing.T) {
 						t.Fatalf("reading the say text file: %v", err)
 					}
 					text = string(data)
+					if i := slices.Index(args, "-o"); i >= 0 && i+1 < len(args) {
+						rendered = args[i+1]
+					}
 				case afplayBinPath:
 					afplay = args
 				}
 				return start(ctx, program, args)
 			}
 
-			if err := guiSayPlay(context.Background(), nil, "hi", tc.savedPath, tc.play); err != nil {
+			if err := guiSayPlay(context.Background(), []string{"--rate", "200"}, "hi", tc.savedPath, tc.play); err != nil {
 				t.Fatalf("guiSayPlay() err = %v, want nil", err)
 			}
-			if text != tc.wantText {
-				t.Errorf("say text = %q, want %q", text, tc.wantText)
+			if text != "hi" {
+				t.Errorf("say text = %q, want the text unchanged", text)
 			}
-			if !slices.Equal(afplay, tc.wantAfplay) {
-				t.Errorf("afplay args = %q, want %q", afplay, tc.wantAfplay)
+			switch {
+			case tc.savedPath != "" && rendered != tc.savedPath:
+				t.Errorf("say rendered to %q, want the saved path %q", rendered, tc.savedPath)
+			case tc.savedPath == "" && filepath.Ext(rendered) != ".aiff":
+				t.Errorf("say rendered to %q, want a temp AIFF", rendered)
+			}
+			var wantAfplay []string
+			if tc.play {
+				wantAfplay = []string{"-v", "0.5", rendered}
+			}
+			if !slices.Equal(afplay, wantAfplay) {
+				t.Errorf("afplay args = %q, want %q", afplay, wantAfplay)
+			}
+			if tc.savedPath == "" {
+				if _, err := os.Stat(rendered); !os.IsNotExist(err) {
+					t.Errorf("temp audio %q was not removed (stat err = %v)", rendered, err)
+				}
 			}
 		})
 	}
@@ -461,8 +464,8 @@ func TestRexGUISayStatus(t *testing.T) {
 			fakeGUIJobs(t, tc.startErr, nil, nil)
 			start := startGUIJobFn
 			startGUIJobFn = func(ctx context.Context, program string, args []string) (guiJobHandle, error) {
-				if tc.savedPath != "" && program == sayBinPath && out.Len() != 0 {
-					t.Error("synthesizing a saved file must not show a speaking indicator")
+				if program == sayBinPath && out.Len() != 0 {
+					t.Error("rendering speech must not show a speaking indicator")
 				}
 				return start(ctx, program, args)
 			}
@@ -471,9 +474,9 @@ func TestRexGUISayStatus(t *testing.T) {
 				t.Fatalf("guiSayPlay() error = %v, want %v", err, tc.startErr)
 			}
 			reports := rexTestReports(t, out.String())
-			if !tc.play {
+			if !tc.play || tc.startErr != nil {
 				if len(reports) != 0 {
-					t.Fatalf("save-only emitted status: %v", reports)
+					t.Fatalf("speech that never played emitted status: %v", reports)
 				}
 				return
 			}

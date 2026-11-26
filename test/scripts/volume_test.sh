@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Plays test/json/volume.jsonl at several volume levels so you can hear the
 # difference. The clip announces its level as a percentage, filled into the
-# fixture's {{percent}} placeholder. Each level plays twice: say speaking directly (the [[volm]]
-# command) and say writing a file that afplay plays (afplay -v, the same route
-# the cloud voices use). macOS only; speaks aloud.
+# fixture's {{percent}} placeholder. say_tts renders each clip to a file and
+# plays it with afplay -v, the same route the cloud voices use. macOS only;
+# speaks aloud.
 #
 # Run from the repo root:
 #   bash test/scripts/volume_test.sh            # levels 0.25 0.5 1
@@ -47,11 +47,10 @@ echo "ok: MCP_TTS_VOLUME=2 was refused"
 # speech). Closing it then makes the server finish the clip and exit.
 play() {
 	local level=$1
-	shift
 	local log="$work/server.log" out="$work/server.out"
 	local percent
 	percent=$(awk -v v="$level" 'BEGIN { printf "%g", v * 100 }')
-	env MCP_TTS_VOLUME="$level" "$bin" --verbose "$@" <"$fifo" >"$out" 2>"$log" &
+	env MCP_TTS_VOLUME="$level" "$bin" --verbose <"$fifo" >"$out" 2>"$log" &
 	local pid=$!
 	exec 3>"$fifo"
 	sed "s/{{percent}}/$percent/" "$fixture" >&3
@@ -73,13 +72,10 @@ play() {
 
 for level in "${levels[@]}"; do
 	echo
-	echo "Volume $level: say speaks directly"
+	echo "Volume $level"
 	play "$level"
-	sleep 1
-	echo "Volume $level: say writes a file, afplay plays it"
-	play "$level" --output-dir "$work"
 	sleep 1
 done
 
 echo
-echo "Done. Saved files in $work stay at full level by design."
+echo "Done."

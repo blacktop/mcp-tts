@@ -48,16 +48,3 @@ func TestResolveVolume(t *testing.T) {
 		})
 	}
 }
-
-func TestSayArgsSetVolumeOnlyWhenSayPlays(t *testing.T) {
-	setVolume(t, 0.25)
-	base := []string{"--rate", "200"}
-
-	assert.Equal(t, []string{"--rate", "200", "[[volm 0.25]] hello"}, sayArgs(base, "hello", ""))
-	assert.Equal(t, []string{"--rate", "200", "-o", "/tmp/out.aiff", "hello"},
-		sayArgs(base, "hello", "/tmp/out.aiff"), "a saved file keeps full level; afplay applies the volume")
-
-	setVolume(t, 1)
-	assert.Equal(t, []string{"--rate", "200", "hello"}, sayArgs(base, "hello", ""),
-		"full volume sends the text unchanged")
-}

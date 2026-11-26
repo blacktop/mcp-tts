@@ -77,67 +77,64 @@ var (
 )
 
 // startSayPlayback takes the speech lock and starts `say` before returning, so
-// admission and start failures reach the caller. The process is then followed
-// in the background, so request cancellation cannot truncate speech.
-func startSayPlayback(ctx context.Context, playArgs []string, savedPath, text string) error {
+// admission and start failures reach the caller. say renders the speech to
+// savedPath, or to a temp file removed afterwards, and afplay then plays it at
+// the configured volume. say never plays to the speakers itself: its embedded
+// volume command is ignored or applied partway through a clip by some voices,
+// Siri voices among them. The work is followed in the background, so request
+// cancellation cannot truncate speech.
+func startSayPlayback(ctx context.Context, baseArgs []string, text, savedPath string) error {
 	lock, err := acquireSpeechLock(ctx, "say_tts")
 	if err != nil {
 		return err
 	}
+	audioPath, removeAudio := savedPath, func() {}
+	if audioPath == "" {
+		if audioPath, removeAudio, err = writeTempFile("mcp-tts-say-*.aiff", nil); err != nil {
+			lock.Release()
+			return fmt.Errorf("preparing say audio: %w", err)
+		}
+	}
 	budget := playback.BudgetForText(len(text))
-	log.Debug("Starting say command", "args", playArgs)
+	renderArgs := sayArgs(baseArgs, text, audioPath)
+	log.Debug("Starting say command", "args", renderArgs)
 	proc, err := startPlayback(playback.Spec{
 		Label:    "say_tts",
 		Path:     "/usr/bin/say",
-		Args:     playArgs,
+		Args:     renderArgs,
 		Budget:   budget,
 		Lock:     lock,
 		Diagnose: playbackDiagnostic(),
 	})
 	if err != nil {
 		lock.Release()
+		removeAudio()
 		return fmt.Errorf("failed to start say command: %w", err)
 	}
 
-	stopSpeaking := func() {}
-	if savedPath == "" {
-		stopSpeaking = beginRexSpeaking(serverCtx)
-	}
 	playbackWG.Go(func() {
 		defer lock.Release()
-		err := proc.Wait(serverCtx)
-		stopSpeaking()
-		if err != nil {
+		defer removeAudio()
+		if err := proc.Wait(serverCtx); err != nil {
 			if serverCtx.Err() == nil {
 				log.Error("Say command failed", "error", err)
 			}
 			return
 		}
-		// say -o wrote the file without playing; play it now.
-		if savedPath != "" {
-			playSavedSpeech(lock, savedPath, budget)
-		}
+		playSavedSpeech(lock, audioPath, budget)
 		log.Info("Speaking text completed", "text", text)
 	})
 	return nil
 }
 
-// sayArgs completes the say arguments. say speaks the text itself at the
-// configured volume or, when savedPath is set, writes the file at full level;
-// a saved file is played, if at all, through afplay at the configured volume.
-func sayArgs(baseArgs []string, text, savedPath string) []string {
-	playArgs := append([]string{}, baseArgs...)
-	if savedPath != "" {
-		return append(playArgs, "-o", savedPath, text)
-	}
-	return append(playArgs, sayVolumeText(text))
+// sayArgs returns the say arguments that render text to outPath at full level.
+func sayArgs(baseArgs []string, text, outPath string) []string {
+	return append(append([]string{}, baseArgs...), "-o", outPath, text)
 }
 
-// playSavedSpeech plays an AIFF that `say -o` wrote, under the speech lock the
-// caller already holds.
+// playSavedSpeech plays an AIFF that `say -o` wrote at the configured volume,
+// under the speech lock the caller already holds.
 func playSavedSpeech(lock *speechlock.Lock, savedPath string, budget time.Duration) {
-	stopSpeaking := beginRexSpeaking(serverCtx)
-	defer stopSpeaking()
 	log.Debug("Playing saved AIFF file", "path", savedPath)
 	proc, err := startPlayback(playback.Spec{
 		Label:    "say_tts",
@@ -148,7 +145,10 @@ func playSavedSpeech(lock *speechlock.Lock, savedPath string, budget time.Durati
 		Diagnose: playbackDiagnostic(),
 	})
 	if err == nil {
+		// Mark the terminal once afplay is running, so marking cannot delay sound.
+		stopSpeaking := beginRexSpeaking(serverCtx)
 		err = proc.Wait(serverCtx)
+		stopSpeaking()
 	}
 	if err != nil && serverCtx.Err() == nil {
 		log.Warn("Failed to play saved audio", "error", err)
@@ -585,26 +585,17 @@ Designed to be used with the MCP (Model Context Protocol).`,
 					savedPath = filepath.Join(outputDir, filename)
 				}
 
+				start := startSayPlayback
 				if mode == sessionRoutable {
-					if err := startRoutableSayPlayback(ctx, args, text, savedPath); err != nil {
-						if ctx.Err() != nil {
-							return textResult("Say command cancelled"), nil, nil
-						}
-						log.Error("Failed to start GUI-routed say playback", "error", err)
-						return errorResult(fmt.Sprintf("Error: %v", err)), nil, nil
-					}
-					return textResult(formatSaveResult(text, savedPath, true)), nil, nil
+					start = startRoutableSayPlayback
 				}
-
-				playArgs := sayArgs(args, text, savedPath)
-				if err := startSayPlayback(ctx, playArgs, savedPath, text); err != nil {
+				if err := start(ctx, args, text, savedPath); err != nil {
 					if ctx.Err() != nil {
 						return textResult("Say command cancelled"), nil, nil
 					}
-					log.Error("Failed to start say playback", "error", err)
+					log.Error("Failed to start say playback", "routed", mode == sessionRoutable, "error", err)
 					return errorResult(fmt.Sprintf("Error: %v", err)), nil, nil
 				}
-
 				return textResult(formatSaveResult(text, savedPath, true)), nil, nil
 			})
 		}

@@ -489,60 +489,55 @@ func killGUIJob(label string) {
 	}
 }
 
-// startGUISay bootstraps a say synthesis (and prepares the optional afplay of a
-// saved AIFF) into the GUI session synchronously, returning a wait func and a
-// cleanup func. text is written to a temp file consumed via `say -f`, keeping
-// user text out of the plist. baseArgs is the validated [--rate N (--voice V)?]
-// slice from sayCommandArgs. When savedPath != "", say writes the AIFF there;
-// when play is true the AIFF (or, with no savedPath, the synthesis itself) is
-// played in the GUI session. A bootstrap failure is returned here so the say
-// handler can report an error instead of a misleading "Speaking:" result.
+// startGUISay bootstraps a say synthesis into the GUI session synchronously,
+// returning a wait func and a cleanup func. text is written to a temp file
+// consumed via `say -f`, keeping user text out of the plist. baseArgs is the
+// validated [--rate N (--voice V)?] slice from sayCommandArgs. say renders to
+// savedPath, or to a temp AIFF when there is none; when play is true, wait then
+// plays that file through afplay at the configured volume (startSayPlayback
+// explains why say never plays itself). A bootstrap failure is returned here so
+// the say handler can report an error instead of a misleading "Speaking:" result.
 func startGUISay(
 	ctx context.Context, baseArgs []string, text, savedPath string, play bool,
 ) (wait func(context.Context) error, cleanup func(), err error) {
-	speaksDirectly := savedPath == "" && play
-	spoken := text
-	if speaksDirectly {
-		spoken = sayVolumeText(text)
-	}
-	txtPath, removeTxt, err := writeTempFile("mcp-tts-say-*.txt", []byte(spoken))
+	txtPath, removeTxt, err := writeTempFile("mcp-tts-say-*.txt", []byte(text))
 	if err != nil {
 		return nil, nil, fmt.Errorf("preparing say text for GUI routing: %w", err)
 	}
-
-	sayArgs := append([]string{}, baseArgs...)
-	if savedPath != "" {
-		sayArgs = append(sayArgs, "-o", savedPath)
+	audioPath, removeAudio := savedPath, func() {}
+	if audioPath == "" {
+		if audioPath, removeAudio, err = writeTempFile("mcp-tts-say-*.aiff", nil); err != nil {
+			removeTxt()
+			return nil, nil, fmt.Errorf("preparing say audio for GUI routing: %w", err)
+		}
 	}
-	sayArgs = append(sayArgs, "-f", txtPath)
-
-	stopSpeaking := func() {}
-	if speaksDirectly {
-		stopSpeaking = beginRexSpeaking(ctx)
+	cleanup = func() {
+		removeTxt()
+		removeAudio()
 	}
+
+	sayArgs := append(append([]string{}, baseArgs...), "-o", audioPath, "-f", txtPath)
 	handle, err := startGUIJobFn(ctx, sayBinPath, sayArgs)
 	if err != nil {
-		stopSpeaking()
-		removeTxt()
+		cleanup()
 		return nil, nil, err
 	}
 
 	wait = func(waitCtx context.Context) error {
-		defer stopSpeaking()
 		if err := waitGUIJobFn(waitCtx, handle); err != nil {
 			return err
 		}
-		if savedPath != "" && play {
-			stopSavedSpeech := beginRexSpeaking(waitCtx)
-			defer stopSavedSpeech()
-			return runInGUISession(waitCtx, afplayBinPath, afplayArgs(savedPath))
+		if !play {
+			return nil
 		}
-		return nil
+		stopSpeaking := beginRexSpeaking(waitCtx)
+		defer stopSpeaking()
+		return runInGUISession(waitCtx, afplayBinPath, afplayArgs(audioPath))
 	}
-	return wait, removeTxt, nil
+	return wait, cleanup, nil
 }
 
-// guiSayPlay routes a say synthesis (and optional afplay of a saved AIFF) through
+// guiSayPlay routes a say synthesis (and, when playing, afplay of the result) through
 // the GUI session, blocking until it completes. It surfaces bootstrap and exit
 // errors to the caller; the save-only handler path relies on this synchronous
 // contract.
@@ -578,7 +573,7 @@ func startRoutableSayPlayback(ctx context.Context, baseArgs []string, text, save
 		if err != nil && serverCtx.Err() == nil {
 			log.Error("GUI-routed say failed", "error", err)
 		}
-		// wait can bootstrap a second job to play a saved file. If that
+		// wait bootstraps a second job to play the rendered file. If that
 		// timed out, the lock is kept while the job may still be speaking.
 		settleGUIStartFailure(err, lock.Release)
 	})

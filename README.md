@@ -108,7 +108,7 @@ By default, the TTS server enforces sequential speech operations - only one TTS 
 **Multi-Instance Protection**: Every mcp-tts process of a user shares one speech lock, a kernel file lock on `speech.lock` in the `mcp-tts` folder of the user cache directory (`~/Library/Caches` on macOS, `%LocalAppData%` on Windows). The kernel releases it when its last holder exits, including a player that outlives its server.
 
 - A request waits up to 45 seconds for its turn. After that the tool returns a "speech is busy" error instead of waiting forever. The error names the lock's recorded holder; that record says who held the lock, not why speech was delayed. Turns are not handed out in arrival order.
-- Each utterance plays in its own child process (`afplay`, `say` or `voice-say` on macOS; a hidden `mcp-tts play` process on Windows) with a time budget based on the audio's length, capped at 15 minutes. A player that overruns its budget is terminated, then killed. If it still cannot be reaped within five seconds, the server reports failure and returns control; a surviving player retains the speech lock, so later requests time out instead of overlapping it. Such a player can require manual intervention.
+- Each utterance plays in its own child process (`afplay` or `voice-say` on macOS, with `say` rendering `say_tts` audio for `afplay`; a hidden `mcp-tts play` process on Windows) with a time budget based on the audio's length, capped at 15 minutes. A player that overruns its budget is terminated, then killed. If it still cannot be reaped within five seconds, the server reports failure and returns control; a surviving player retains the speech lock, so later requests time out instead of overlapping it. Such a player can require manual intervention.
 - If a server is killed while speaking, its player keeps the lock until it stops making sound (macOS) or is ended with the server (Windows), so the next speaker does not talk over it. On macOS this covers players the server starts directly. Speech routed through a GUI login session from a background session is not covered: a server killed mid-speech there can still be talked over.
 - On macOS, the server attempts a short stack sample of an overrunning player in `~/Library/Caches/mcp-tts/incidents/` (the newest ten are kept; they contain no speech text). Sampling is best effort and never delays termination.
 
@@ -158,7 +158,7 @@ export MCP_TTS_VOLUME=0.3
 mcp-tts --volume 0.3
 ```
 
-`1` is full level. The cloud voices pass the value to their player (`afplay` on macOS). Below `1`, `say_tts` passes it to `say` as an embedded `[[volm]]` command, which voices apply differently: at `0.5`, Premium voices drop about 6 dB, older voices such as Samantha about 12 dB, and Siri voices not at all. `voice_tts` ignores the setting, because `voice-say` plays its own audio and has no volume option. Saved audio files keep full level.
+`1` is full level. `say_tts` and the cloud voices play through the same player (`afplay` on macOS). `say_tts` renders each clip to a file before playing it, so every macOS voice, Siri voices included, drops by the same amount. `voice_tts` ignores the setting, because `voice-say` plays its own audio and has no volume option. Saved audio files keep full level.
 
 ### Saving Audio to Disk
 

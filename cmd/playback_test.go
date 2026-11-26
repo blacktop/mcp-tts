@@ -302,42 +302,55 @@ func TestStartSayPlaybackSurfacesStartFailureAndFreesLock(t *testing.T) {
 	startPlayback = func(playback.Spec) (*playback.Proc, error) { return nil, errors.New("exec failed") }
 	t.Cleanup(func() { startPlayback = original })
 
-	err := startSayPlayback(context.Background(), []string{"--rate", "200", "hello"}, "", "hello")
+	err := startSayPlayback(context.Background(), []string{"--rate", "200"}, "hello", "")
 	require.ErrorContains(t, err, "failed to start say command")
 	requireSpeechLockFree(t, path)
 }
 
-func TestStartSayPlaybackHoldsLockUntilSpeechEnds(t *testing.T) {
-	path := useTestSpeechLock(t)
-	useTestServer(t)
-	players := useStandInPlayers(t, []string{"sleep", "400ms"})
+func TestStartSayPlaybackRendersThenPlaysAtVolume(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		saved bool
+	}{
+		{name: "temp file"},
+		{name: "saved file", saved: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := useTestSpeechLock(t)
+			useTestServer(t)
+			players := useStandInPlayers(t, []string{"sleep", "300ms"})
+			savedPath := ""
+			if tc.saved {
+				savedPath = filepath.Join(t.TempDir(), "out.aiff")
+				require.NoError(t, os.WriteFile(savedPath, []byte("audio"), 0o600))
+			}
 
-	require.NoError(t, startSayPlayback(context.Background(), []string{"--rate", "200", "hello"}, "", "hello"))
-	assert.True(t, speechLockHeld(path), "lock must stay held while say is still speaking")
-	playbackWG.Wait()
-	requireSpeechLockFree(t, path)
+			require.NoError(t, startSayPlayback(context.Background(), []string{"--rate", "200"}, "hello", savedPath))
+			assert.True(t, speechLockHeld(path), "lock must stay held while say is still rendering")
+			playbackWG.Wait()
+			requireSpeechLockFree(t, path)
 
-	started := players.started()
-	require.Len(t, started, 1)
-	assert.Equal(t, "/usr/bin/say", started[0].Path)
-	assert.Equal(t, playback.BudgetForText(len("hello")), started[0].Budget)
-	assert.NotNil(t, started[0].Lock, "say must inherit the speech lock")
-}
-
-func TestStartSayPlaybackPlaysSavedFileUnderSameLock(t *testing.T) {
-	path := useTestSpeechLock(t)
-	useTestServer(t)
-	players := useStandInPlayers(t, []string{"ok"})
-
-	require.NoError(t, startSayPlayback(context.Background(), []string{"-o", "/tmp/out.aiff", "hello"}, "/tmp/out.aiff", "hello"))
-	playbackWG.Wait()
-	requireSpeechLockFree(t, path)
-
-	started := players.started()
-	require.Len(t, started, 2, "say renders the file, then afplay plays it")
-	assert.Equal(t, "/usr/bin/afplay", started[1].Path)
-	assert.Equal(t, []string{"-v", "0.5", "/tmp/out.aiff"}, started[1].Args)
-	assert.Same(t, started[0].Lock, started[1].Lock, "the saved file must play under the lock say took")
+			started := players.started()
+			require.Len(t, started, 2, "say renders the speech, then afplay plays it")
+			say, afplay := started[0], started[1]
+			require.Len(t, say.Args, 5)
+			audioPath := say.Args[3]
+			assert.Equal(t, "/usr/bin/say", say.Path)
+			assert.Equal(t, []string{"--rate", "200", "-o", audioPath, "hello"}, say.Args)
+			assert.Equal(t, playback.BudgetForText(len("hello")), say.Budget)
+			assert.Equal(t, "/usr/bin/afplay", afplay.Path)
+			assert.Equal(t, []string{"-v", "0.5", audioPath}, afplay.Args, "say must not play itself; afplay applies the volume")
+			assert.Same(t, say.Lock, afplay.Lock, "playback must run under the lock say took")
+			if tc.saved {
+				assert.Equal(t, savedPath, audioPath)
+				assert.FileExists(t, savedPath, "the saved file must be kept")
+				return
+			}
+			assert.Equal(t, ".aiff", filepath.Ext(audioPath))
+			_, err := os.Stat(audioPath)
+			assert.True(t, os.IsNotExist(err), "the temp audio file must be removed after playback")
+		})
+	}
 }
 
 func TestStartSayPlaybackReportsBusyWithoutStartingSay(t *testing.T) {
@@ -347,7 +360,7 @@ func TestStartSayPlaybackReportsBusyWithoutStartingSay(t *testing.T) {
 	holdSpeechLock(t, path, "openai_tts")
 	players := useStandInPlayers(t, []string{"ok"})
 
-	err := startSayPlayback(context.Background(), []string{"hello"}, "", "hello")
+	err := startSayPlayback(context.Background(), nil, "hello", "")
 	require.ErrorContains(t, err, "speech is busy")
 	assert.Empty(t, players.started(), "say must not start while other speech holds the lock")
 }

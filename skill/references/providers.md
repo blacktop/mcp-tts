@@ -85,7 +85,7 @@ Rules:
 
 Loudness is a server setting, not a tool argument. The server reads `MCP_TTS_VOLUME` (or the `--volume` flag) once at startup: a value above 0 and at most 1, with a default of `0.5`. No call can change it for one announcement, so do not try:
 
-- Leave `[[volm …]]` and other embedded speech commands out of the text. `say_tts` already adds its own, so a second one would stack on top of the user's setting.
+- Leave `[[volm …]]` and other embedded speech commands out of the text. Some voices, Siri voices among them, ignore the command or apply it partway through a clip.
 - Leave the system output volume alone. Turning it down quiets every other app too.
 
 When the user says speech is too loud or too quiet, explain the setting and offer to change it. Edit the `env` block of the mcp-tts entry in their MCP client configuration only when they ask, keep every other entry, and write a plain decimal such as `"0.3"`, because a value the server cannot parse stops it from starting. The new level applies after the MCP connection restarts. If it still has no effect, the installed server may predate the setting; `mcp-tts --help` lists `--volume` when it is supported.
@@ -93,8 +93,7 @@ When the user says speech is too loud or too quiet, explain the setting and offe
 The setting does not reach every voice:
 
 - `voice_tts` always plays at full level. `voice-say` plays its own audio and has no volume option. If the user wants all speech quieter, offer a provider preference that puts `say_tts` first (`local_strategy: priority`), because the balanced default sends about half of all announcements through `voice_tts`.
-- `say_tts` voices honor the setting unevenly. At `0.5`, Premium voices drop about 6 dB, older voices such as Samantha about 12 dB, and Siri voices not at all.
-- Cloud tools pass it to the audio player, so every cloud voice is affected equally.
+- `say_tts` renders each clip to a file and plays it through the same player as the cloud tools, so every macOS voice, Siri voices included, drops by the same amount.
 - Audio saved with `--output-dir` stays at full level; only playback is scaled.
 
 ## Error classification

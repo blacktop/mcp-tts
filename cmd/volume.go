@@ -48,14 +48,3 @@ func volumeArg() string {
 func afplayArgs(path string) []string {
 	return []string{"-v", volumeArg(), path}
 }
-
-// sayVolumeText prefixes text with say's embedded volume command. Use it only
-// when say plays the speech itself; a file written with say -o would keep the
-// lower level, and is played through afplay at the configured volume instead.
-// At full volume the text is passed through unchanged.
-func sayVolumeText(text string) string {
-	if volume == 1 {
-		return text
-	}
-	return "[[volm " + volumeArg() + "]] " + text
-}

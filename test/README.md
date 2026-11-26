@@ -49,7 +49,7 @@
 ```
 
 ### Volume Test
-Speaks aloud on macOS. Each level plays twice: once through `say` directly and once through `afplay`, the route the cloud voices use. Run from the repo root:
+Speaks aloud on macOS. Each level plays once, announcing its own percentage. Run from the repo root:
 ```bash
 bash test/scripts/volume_test.sh            # levels 0.25, 0.5 and 1
 bash test/scripts/volume_test.sh 0.1 0.3    # your own levels
