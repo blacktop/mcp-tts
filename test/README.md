@@ -22,7 +22,7 @@
 - **`openai_tts_comprehensive.json`** - Full OpenAI TTS feature test
 - **`tts_elicitation.jsonl`** - Interactive `tts` request fixture consumed by the Go integration harness; the harness supplies the `elicitation/create` replies, so this is not a standalone stdin transcript
 - **`voice_tts.jsonl`** - Opt-in audible `voice_tts` fixture that verifies registration and calls the tool through MCP stdio
-- **`volume.jsonl`** - One `say_tts` call for `volume_test.sh`; volume is a server setting, so the script runs one server per level and fills the level into the text's `{{percent}}` placeholder
+- **`volume.jsonl`** - One TTS call for `volume_test.sh`; volume is a server setting, so the script runs one server per level and tool and fills in the `{{tool}}`, `{{speaker}}` and `{{percent}}` placeholders
 
 ### **🔍 Other Files**
 - **`main.go`** - Go-based test runner
@@ -49,7 +49,7 @@
 ```
 
 ### Volume Test
-Speaks aloud on macOS. Each level plays once, announcing its own percentage. Run from the repo root:
+Speaks aloud on macOS. Each level plays a `say_tts` clip, then a `voice_tts` clip when `voice-say` is installed; each clip names its tool and percentage. Run from the repo root:
 ```bash
 bash test/scripts/volume_test.sh            # levels 0.25, 0.5 and 1
 bash test/scripts/volume_test.sh 0.1 0.3    # your own levels

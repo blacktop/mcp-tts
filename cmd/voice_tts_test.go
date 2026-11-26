@@ -90,6 +90,32 @@ func TestRegisterVoiceTTSToolPATHGate(t *testing.T) {
 	assert.Equal(t, []any{"text"}, schema["required"])
 }
 
+// useVoiceSayHelp makes voice-say --help print help, or fail with err.
+func useVoiceSayHelp(t *testing.T, help string, err error) {
+	t.Helper()
+	original := voiceSayHelp
+	voiceSayHelp = func(context.Context, string) ([]byte, error) { return []byte(help), err }
+	t.Cleanup(func() { voiceSayHelp = original })
+}
+
+func TestVoiceSayAcceptsVolume(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		help string
+		err  error
+		want bool
+	}{
+		{name: "has --volume", help: "  --speed <speed>\n  --volume <volume>\n", want: true},
+		{name: "older release", help: "  --speed <speed>\n  --seed <seed>\n"},
+		{name: "help fails", err: errors.New("exit status 64")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			useVoiceSayHelp(t, tc.help, tc.err)
+			assert.Equal(t, tc.want, voiceSayAcceptsVolume("/test/bin/voice-say"))
+		})
+	}
+}
+
 func TestVoiceTTSToolInvocation(t *testing.T) {
 	originalLookPath := voiceSayLookPath
 	originalRunner := voiceSayRunner
@@ -106,6 +132,7 @@ func TestVoiceTTSToolInvocation(t *testing.T) {
 	voiceSayLookPath = func(string) (string, error) {
 		return binaryPath, nil
 	}
+	useVoiceSayHelp(t, "  --volume <volume>       Playback volume, above 0 and at most 1.", nil)
 
 	var (
 		lockHeldWhileSpeaking bool
@@ -155,6 +182,7 @@ func TestVoiceTTSToolInvocation(t *testing.T) {
 		"--voice", "Ryan",
 		"--tier", "small",
 		"--style", "calm and unhurried",
+		"--volume", "0.5",
 	}, gotArgs)
 	assert.Equal(t, "Local speech", gotText)
 }
@@ -257,7 +285,7 @@ func TestCallVoiceTTSCommandFailure(t *testing.T) {
 		return errors.New("model failed to load")
 	}
 
-	result := callVoiceTTS(context.Background(), "/test/bin/voice-say", VoiceTTSParams{Text: "hello"})
+	result := callVoiceTTS(context.Background(), "/test/bin/voice-say", false, VoiceTTSParams{Text: "hello"})
 	require.NotNil(t, result)
 	assert.True(t, result.IsError)
 	assert.Contains(t, extractTextFromMCPResult(result), "voice-say failed: model failed to load")
@@ -276,7 +304,7 @@ func TestCallVoiceTTSReportsBusySpeechLock(t *testing.T) {
 		return nil
 	}
 
-	result := callVoiceTTS(context.Background(), "/test/bin/voice-say", VoiceTTSParams{Text: "hello"})
+	result := callVoiceTTS(context.Background(), "/test/bin/voice-say", false, VoiceTTSParams{Text: "hello"})
 	require.NotNil(t, result)
 	assert.True(t, result.IsError)
 	assert.Contains(t, extractTextFromMCPResult(result), "speech is busy")
@@ -302,7 +330,7 @@ func TestCallVoiceTTSRejectsNoPlay(t *testing.T) {
 	outputDir = t.TempDir()
 	noPlay = true
 
-	result := callVoiceTTS(context.Background(), "/test/bin/voice-say", VoiceTTSParams{Text: "hello"})
+	result := callVoiceTTS(context.Background(), "/test/bin/voice-say", false, VoiceTTSParams{Text: "hello"})
 	require.NotNil(t, result)
 	assert.True(t, result.IsError)
 	assert.Contains(t, extractTextFromMCPResult(result), "voice_tts cannot run with --no-play")

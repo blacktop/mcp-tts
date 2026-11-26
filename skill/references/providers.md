@@ -92,7 +92,7 @@ When the user says speech is too loud or too quiet, explain the setting and offe
 
 The setting does not reach every voice:
 
-- `voice_tts` always plays at full level. `voice-say` plays its own audio and has no volume option. If the user wants all speech quieter, offer a provider preference that puts `say_tts` first (`local_strategy: priority`), because the balanced default sends about half of all announcements through `voice_tts`.
+- `voice_tts` applies it only when the installed `voice-say` has a `--volume` option; older versions play at full level. If `voice_tts` sounds louder than `say_tts`, suggest updating Voice. Until then, offer a provider preference that puts `say_tts` first (`local_strategy: priority`), because the balanced default sends about half of all announcements through `voice_tts`.
 - `say_tts` renders each clip to a file and plays it through the same player as the cloud tools, so every macOS voice, Siri voices included, drops by the same amount.
 - Audio saved with `--output-dir` stays at full level; only playback is scaled.
 

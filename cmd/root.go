@@ -333,7 +333,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&noPlay, "no-play", false, "Skip playback, only save (requires --output-dir)")
 	rootCmd.PersistentFlags().BoolVar(&rexTabLabelEnabled, "rex-tab-label", false, "Temporarily prefix the exact Rex tab label with 🔊 during playback")
 	rootCmd.PersistentFlags().Float64Var(&volume, "volume", defaultVolume,
-		"Playback volume, above 0 and at most 1; voice_tts ignores it (env: MCP_TTS_VOLUME)")
+		"Playback volume, above 0 and at most 1 (env: MCP_TTS_VOLUME)")
 
 	// Check environment variable for suppressing output
 	if os.Getenv("MCP_TTS_SUPPRESS_SPEAKING_OUTPUT") == "true" {

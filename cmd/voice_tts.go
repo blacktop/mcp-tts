@@ -22,12 +22,15 @@ THE SOFTWARE.
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/charmbracelet/log"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -38,9 +41,17 @@ import (
 
 const voiceSayBinary = "voice-say"
 
+// voiceSayHelpTimeout bounds the one-time check for voice-say's --volume option.
+const voiceSayHelpTimeout = 5 * time.Second
+
 var (
 	voiceSayLookPath = exec.LookPath
 	voiceSayRunner   = runVoiceSayCommand
+	// voiceSayHelp returns what voice-say prints for --help. A variable so tests
+	// can stand in for the binary.
+	voiceSayHelp = func(ctx context.Context, path string) ([]byte, error) {
+		return exec.CommandContext(ctx, path, "--help").CombinedOutput()
+	}
 	// voiceTTSSupported is false on Windows. voice-say runs MLX models and
 	// exists only for macOS, and on Windows speech is serialized by the hidden
 	// player, which a voice-say child would bypass.
@@ -114,16 +125,36 @@ func registerVoiceTTSTool(server *mcp.Server) {
 		},
 	}
 
+	// Checked on first use rather than at startup, since voice_tts may never run.
+	acceptsVolume := sync.OnceValue(func() bool { return voiceSayAcceptsVolume(binaryPath) })
 	mcp.AddTool(server, tool, func(
 		ctx context.Context,
 		_ *mcp.CallToolRequest,
 		input VoiceTTSParams,
 	) (*mcp.CallToolResult, any, error) {
-		return callVoiceTTS(ctx, binaryPath, input), nil, nil
+		return callVoiceTTS(ctx, binaryPath, acceptsVolume(), input), nil, nil
 	})
 }
 
-func callVoiceTTS(ctx context.Context, binaryPath string, input VoiceTTSParams) *mcp.CallToolResult {
+// voiceSayAcceptsVolume reports whether the voice-say at path has a --volume
+// option. Older releases reject the option, so they get none and play at full
+// level.
+func voiceSayAcceptsVolume(path string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), voiceSayHelpTimeout)
+	defer cancel()
+	help, err := voiceSayHelp(ctx, path)
+	if err != nil {
+		log.Warn("Could not read voice-say --help; voice_tts plays at full volume", "path", path, "error", err)
+		return false
+	}
+	if !bytes.Contains(help, []byte("--volume")) {
+		log.Info("voice-say has no --volume option; voice_tts plays at full volume", "path", path)
+		return false
+	}
+	return true
+}
+
+func callVoiceTTS(ctx context.Context, binaryPath string, acceptsVolume bool, input VoiceTTSParams) *mcp.CallToolResult {
 	select {
 	case <-ctx.Done():
 		return textResult("Request cancelled")
@@ -133,6 +164,9 @@ func callVoiceTTS(ctx context.Context, binaryPath string, input VoiceTTSParams) 
 	args, err := voiceSayArgs(input)
 	if err != nil {
 		return errorResult(fmt.Sprintf("Error: %v", err))
+	}
+	if acceptsVolume {
+		args = append(args, "--volume", volumeArg())
 	}
 	if !shouldPlay() {
 		return errorResult("Error: voice_tts cannot run with --no-play because voice-say does not expose audio-file output")

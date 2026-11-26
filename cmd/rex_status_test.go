@@ -161,7 +161,7 @@ func TestRexVoiceCleanup(t *testing.T) {
 				}
 				return nil
 			}
-			_ = callVoiceTTS(ctx, "voice-say", VoiceTTSParams{Text: "private spoken content"})
+			_ = callVoiceTTS(ctx, "voice-say", false, VoiceTTSParams{Text: "private spoken content"})
 			reports := rexTestReports(t, out.String())
 			if noPlay {
 				require.Empty(t, reports)

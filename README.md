@@ -158,7 +158,7 @@ export MCP_TTS_VOLUME=0.3
 mcp-tts --volume 0.3
 ```
 
-`1` is full level. `say_tts` and the cloud voices play through the same player (`afplay` on macOS). `say_tts` renders each clip to a file before playing it, so every macOS voice, Siri voices included, drops by the same amount. `voice_tts` ignores the setting, because `voice-say` plays its own audio and has no volume option. Saved audio files keep full level.
+`1` is full level. `say_tts` and the cloud voices play through the same player (`afplay` on macOS). `say_tts` renders each clip to a file before playing it, so every macOS voice, Siri voices included, drops by the same amount. `voice_tts` passes it to `voice-say` when the installed version lists a `--volume` option in `voice-say --help`; older versions play at full level. Saved audio files keep full level.
 
 ### Saving Audio to Disk
 
@@ -223,7 +223,7 @@ Flags:
       --sequential-tts             Enforce sequential TTS (prevent concurrent speech) (default true)
       --suppress-speaking-output   Suppress 'Speaking:' text output
   -v, --verbose                    Enable verbose debug logging
-      --volume float               Playback volume, above 0 and at most 1; voice_tts ignores it (env: MCP_TTS_VOLUME) (default 0.5)
+      --volume float               Playback volume, above 0 and at most 1 (env: MCP_TTS_VOLUME) (default 0.5)
 ```
 
 ### Configuration
@@ -306,7 +306,7 @@ Or manually add to `~/.gemini/settings.json` (or `.gemini/settings.json` in proj
 - `MCP_TTS_SUPPRESS_SPEAKING_OUTPUT`: Set to "true" to suppress "Speaking:" output (optional)
 - `MCP_TTS_ALLOW_CONCURRENT`: Set to "true" to allow concurrent TTS operations (optional, defaults to sequential)
 - `MCP_TTS_OUTPUT_DIR`: Directory to save audio files (optional)
-- `MCP_TTS_VOLUME`: Playback volume, above 0 and at most 1 (also `--volume`; optional, default 0.5). `voice_tts` ignores it.
+- `MCP_TTS_VOLUME`: Playback volume, above 0 and at most 1 (also `--volume`; optional, default 0.5). `voice_tts` uses it only with a `voice-say` that has a `--volume` option.
 - `MCP_TTS_NO_PLAY`: Set to "true" to skip playback when saving (optional, requires `MCP_TTS_OUTPUT_DIR`)
 - `MCP_TTS_ELICIT`: Set to "true" to enable interactive elicitation prompts (also `--elicit`; optional, default off). When off, tools use explicit arguments/defaults without prompting — recommended for agent use.
 
