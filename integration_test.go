@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -620,6 +622,115 @@ func TestMCPIntegration_Initialize(t *testing.T) {
 
 	err := runner.initialize()
 	assert.NoError(t, err, "MCP initialization should succeed")
+}
+
+// request sends one JSON-RPC call and waits for its response.
+func (r *MCPTestRunner) request(id int, method string, params any) MCPResponse {
+	r.t.Helper()
+	require.NoError(r.t, r.sendMessage(MCPMessage{JSONRpc: "2.0", ID: id, Method: method, Params: params}))
+	response, err := r.waitForResponse(id)
+	require.NoError(r.t, err, "%s should get a response", method)
+	return response
+}
+
+// The server publishes the speak skill through the MCP Skills extension. This
+// walks the host side of SEP-2640: discover the extension, list the skill, get
+// it by URI, and verify every listed file's digest and size against what
+// resources/read returns.
+func TestMCPIntegration_SpeakSkillOverMCP(t *testing.T) {
+	runner := NewMCPTestRunner(t)
+	defer runner.Close()
+
+	initialized := runner.request(1, "initialize", InitializeParams{
+		ProtocolVersion: "2025-11-25",
+		ClientInfo:      map[string]any{"name": "skills-test", "version": "1.0.0"},
+		Capabilities:    map[string]any{},
+	})
+	require.Nil(t, initialized.Error)
+	capabilities := initialized.Result.(map[string]any)["capabilities"].(map[string]any)
+	assert.Contains(t, capabilities, "resources", "the skills extension requires the resources capability")
+	extensions, _ := capabilities["extensions"].(map[string]any)
+	assert.Contains(t, extensions, "io.modelcontextprotocol/skills")
+
+	listed := runner.request(2, "skills/list", map[string]any{})
+	require.Nil(t, listed.Error)
+	list := listed.Result.(map[string]any)
+	assert.Equal(t, "complete", list["resultType"])
+	assert.Equal(t, "public", list["cacheScope"])
+	assert.Contains(t, list, "ttlMs")
+	skills := list["skills"].([]any)
+	require.Len(t, skills, 1)
+	entry := skills[0].(map[string]any)
+	assert.Equal(t, "skill://speak/SKILL.md", entry["uri"])
+	assert.Equal(t, "speak", entry["frontmatter"].(map[string]any)["name"])
+
+	got := runner.request(3, "skills/get", map[string]any{"uri": "skill://speak/SKILL.md"})
+	require.Nil(t, got.Error)
+	assert.Equal(t, entry, got.Result.(map[string]any)["skill"], "skills/get returns the listed entry")
+
+	for id, params := range map[int]any{4: map[string]any{"uri": "skill://nope/SKILL.md"}, 5: nil} {
+		rejected := runner.request(id, "skills/get", params)
+		require.NotNil(t, rejected.Error, "skills/get with params %v", params)
+		assert.Equal(t, "-32602", fmt.Sprint(rejected.Error.(map[string]any)["code"]))
+	}
+
+	resources := entry["resources"].([]any)
+	require.NotEmpty(t, resources)
+	for i, item := range resources {
+		listedFile := item.(map[string]any)
+		uri := listedFile["uri"].(string)
+		read := runner.request(10+i, "resources/read", map[string]any{"uri": uri})
+		require.Nil(t, read.Error, "reading %s", uri)
+		contents := read.Result.(map[string]any)["contents"].([]any)
+		require.Len(t, contents, 1)
+		text := contents[0].(map[string]any)["text"].(string)
+		sum := sha256.Sum256([]byte(text))
+		assert.Equal(t, "sha256:"+hex.EncodeToString(sum[:]), listedFile["digest"], "digest of %s", uri)
+		assert.Equal(t, fmt.Sprint(len(text)), fmt.Sprint(listedFile["size"]), "size of %s", uri)
+	}
+}
+
+type skillsListParams struct {
+	sdkmcp.ParamsBase
+}
+
+type skillsListResult struct {
+	sdkmcp.ResultBase
+	Skills []struct {
+		URI string `json:"uri"`
+	} `json:"skills"`
+}
+
+// A client on the current protocol discovers the extension through
+// server/discover rather than initialize, and its skills/list calls carry the
+// request _meta that protocol requires.
+func TestMCPIntegration_SpeakSkillCurrentProtocol(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	wd, err := os.Getwd()
+	require.NoError(t, err)
+	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "skills-current-protocol", Version: "1.0.0"}, nil)
+	require.NoError(t, sdkmcp.AddSendingCustomMethod[*skillsListParams, *skillsListResult](client, "skills/list"))
+	session, err := client.Connect(ctx, &sdkmcp.CommandTransport{
+		Command: exec.CommandContext(ctx, "go", "run", filepath.Join(wd, "main.go")),
+	}, nil)
+	require.NoError(t, err)
+	defer func() { _ = session.Close() }()
+
+	result := session.InitializeResult()
+	require.NotNil(t, result)
+	assert.Equal(t, "2026-07-28", result.ProtocolVersion)
+	assert.Contains(t, result.Capabilities.Extensions, "io.modelcontextprotocol/skills")
+
+	list, err := sdkmcp.CallCustomMethod[*skillsListParams, *skillsListResult](ctx, session, "skills/list", &skillsListParams{})
+	require.NoError(t, err)
+	require.Len(t, list.Skills, 1)
+	assert.Equal(t, "skill://speak/SKILL.md", list.Skills[0].URI)
+
+	read, err := session.ReadResource(ctx, &sdkmcp.ReadResourceParams{URI: "skill://speak/SKILL.md"})
+	require.NoError(t, err)
+	require.Len(t, read.Contents, 1)
+	assert.True(t, strings.HasPrefix(read.Contents[0].Text, "---\nname: speak\n"))
 }
 
 func TestMCPIntegration_ToolsList(t *testing.T) {

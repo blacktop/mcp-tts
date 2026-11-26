@@ -368,6 +368,10 @@ This repo includes a **speak** skill that automatically announces plans, issues,
 
 Skills follow the [Agent Skills](https://agentskills.io) open standard and work across Claude Code, Codex CLI, and Gemini CLI.
 
+### Skill from the MCP server
+
+The server also publishes the skill itself through the [MCP Skills extension](https://modelcontextprotocol.io/extensions/skills/overview) (`io.modelcontextprotocol/skills`), serving its files as resources under `skill://speak/`. A client that supports the extension loads the skill from the server, so it always matches the installed server version and needs no separate install. Claude Code supports it from v2.1.331 as a beta, but the feature can still be switched off for an account; when it is on, `/mcp` lists a skill count for the server. Clients without the extension ignore it, so install the skill with one of the methods below for them.
+
 ### Install Skill
 
 #### skills.sh

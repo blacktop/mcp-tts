@@ -28,6 +28,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -469,7 +470,12 @@ Designed to be used with the MCP (Model Context Protocol).`,
 			WebsiteURL: "https://github.com/blacktop/mcp-tts",
 			Icons:      []mcp.Icon{serverIcon},
 		}
-		s := mcp.NewServer(impl, nil)
+		capabilities := &mcp.ServerCapabilities{}
+		capabilities.AddExtension(skillsExtension, nil)
+		s := mcp.NewServer(impl, &mcp.ServerOptions{Capabilities: capabilities})
+		if err := addSkill(s, embeddedFiles); err != nil {
+			return fmt.Errorf("publishing the bundled speak skill: %w", err)
+		}
 
 		// Prompt functionality removed - focusing on tools with new SDK
 
@@ -971,9 +977,15 @@ func safeLog(message string, req *http.Request) {
 	log.With(reqCopy).Debug(message)
 }
 
+// embeddedFiles holds the files main embeds in the binary, including the speak
+// skill under skillDir.
+var embeddedFiles fs.FS
+
 // Execute adds all child commands to the root command and sets flags appropriately.
 // This is called by main.main(). It only needs to happen once to the rootCmd.
-func Execute() {
+// files holds the speak skill that the server publishes to MCP clients.
+func Execute(files fs.FS) {
+	embeddedFiles = files
 	if err := rootCmd.Execute(); err != nil {
 		log.Fatal("Failed to execute command", "error", err)
 	}

@@ -21,8 +21,18 @@ THE SOFTWARE.
 */
 package main
 
-import "github.com/blacktop/mcp-tts/cmd"
+import (
+	"embed"
+
+	"github.com/blacktop/mcp-tts/cmd"
+)
+
+// files embeds the speak skill so the server can publish it to MCP clients that
+// support skills. The skill directory stays the single source.
+//
+//go:embed skill
+var files embed.FS
 
 func main() {
-	cmd.Execute()
+	cmd.Execute(files)
 }
