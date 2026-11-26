@@ -9,7 +9,7 @@ require (
 	github.com/coder/websocket v1.8.15
 	github.com/gopxl/beep/v2 v2.1.1
 	github.com/modelcontextprotocol/go-sdk v1.8.0
-	github.com/openai/openai-go/v3 v3.106.0
+	github.com/openai/openai-go/v3 v3.108.0
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
 	golang.org/x/sys v0.50.0

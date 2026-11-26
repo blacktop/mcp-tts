@@ -83,8 +83,8 @@ github.com/modelcontextprotocol/go-sdk v1.8.0 h1:KIvahhYqwtbeniWVPs3TcXEA7b8jEtw
 github.com/modelcontextprotocol/go-sdk v1.8.0/go.mod h1:dL7u98E/zjJTGzEq+j30jQ8K2k1mb6LeAH4inEcSGts=
 github.com/muesli/termenv v0.16.0 h1:S5AlUN9dENB57rsbnkPyfdGuWIlkmzJjbFf0Tf5FWUc=
 github.com/muesli/termenv v0.16.0/go.mod h1:ZRfOIKPFDYQoDFF4Olj7/QJbW60Ol/kL1pU3VfY/Cnk=
-github.com/openai/openai-go/v3 v3.106.0 h1:F5gWWDbF+tqE2tMz5OgntySQSRJJJAFPv4Ld9864nc0=
-github.com/openai/openai-go/v3 v3.106.0/go.mod h1:dYJy3sozy5kqizqdbtk1xKLr2WBPDaw8woVu+cWmQIA=
+github.com/openai/openai-go/v3 v3.108.0 h1:KkG+j4KiRbg199oTi9pLg5r9nwnJYvNn7YRwobNhog8=
+github.com/openai/openai-go/v3 v3.108.0/go.mod h1:dYJy3sozy5kqizqdbtk1xKLr2WBPDaw8woVu+cWmQIA=
 github.com/pkg/errors v0.9.1 h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=
 github.com/pkg/errors v0.9.1/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=
 github.com/rivo/uniseg v0.4.7 h1:WUdvkW8uEhrYfLC4ZzdpI2ztxP1I582+49Oc5Mq64VQ=
