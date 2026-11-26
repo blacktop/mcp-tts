@@ -28,11 +28,7 @@ var sessionModeFn = currentSessionMode
 
 func headlessAudioError(string) string { return "" }
 
-func guiSayPlay(context.Context, []string, string, string, bool) error {
-	return errGUIUnsupported
-}
-
-func startRoutableSayPlayback(context.Context, []string, string, string) error {
+func guiSayRender(context.Context, []string, string, string) error {
 	return errGUIUnsupported
 }
 

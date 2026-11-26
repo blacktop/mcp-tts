@@ -18,10 +18,16 @@ import (
 // so this is an early-failure heuristic and not proof that audio is audible.
 const afplayStartupWindow = 250 * time.Millisecond
 
+// afplayArgs returns the afplay arguments that play path at the configured
+// volume.
+func afplayArgs(path string) []string {
+	return []string{"-v", volumeArg(), path}
+}
+
 // startClip plays a clip with afplay as a child of this process. The child
 // inherits the speech lock, so the lock stays held while it can make sound.
 func startClip(ctx context.Context, c clip) error {
-	ext, data := clipMP3, c.data
+	ext, data := c.format, c.data
 	if c.format == clipPCM {
 		var wav bytes.Buffer
 		if err := writeWAVHeader(&wav, len(c.data), c.sampleRate, 1, 16); err != nil {

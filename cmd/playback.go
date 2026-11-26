@@ -23,8 +23,9 @@ const (
 	// stopAllowance is how long cancelled playbacks get to end their players.
 	stopAllowance = 10 * time.Second
 
-	clipMP3 = "mp3"
-	clipPCM = "pcm"
+	clipMP3  = "mp3"
+	clipPCM  = "pcm"
+	clipAIFF = "aiff" // say_tts audio, macOS only
 )
 
 var (
@@ -43,7 +44,7 @@ var (
 // clip is fully synthesized audio ready to be played.
 type clip struct {
 	label      string
-	format     string // clipMP3 or clipPCM
+	format     string // clipMP3, clipPCM or clipAIFF
 	data       []byte
 	sampleRate int // clipPCM only
 	budget     time.Duration

@@ -42,9 +42,3 @@ func checkVolume(v float64) error {
 func volumeArg() string {
 	return strconv.FormatFloat(volume, 'f', -1, 64)
 }
-
-// afplayArgs returns the afplay arguments that play path at the configured
-// volume.
-func afplayArgs(path string) []string {
-	return []string{"-v", volumeArg(), path}
-}

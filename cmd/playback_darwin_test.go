@@ -49,6 +49,30 @@ func TestStartClipPlaysUnderLockAndCleansUp(t *testing.T) {
 	assert.True(t, os.IsNotExist(err), "temp audio file must be removed after playback")
 }
 
+func TestPlayAIFFPlaysThroughAfplayAtVolume(t *testing.T) {
+	path := useTestSpeechLock(t)
+	useTestServer(t)
+	fakeSessionMode(t, sessionAqua, "Aqua")
+	players := useStandInPlayers(t, []string{"sleep", "300ms"})
+
+	require.NoError(t, playAIFF(context.Background(), "hello", []byte("aiff bytes")))
+	started := players.started()
+	require.Len(t, started, 1)
+	spec := started[0]
+	require.Len(t, spec.Args, 3)
+	audioPath := spec.Args[2]
+	assert.Equal(t, afplayBinPath, spec.Path)
+	assert.Equal(t, []string{"-v", "0.5", audioPath}, spec.Args)
+	assert.Equal(t, ".aiff", filepath.Ext(audioPath))
+	assert.Equal(t, playback.BudgetForText(len("hello")), spec.Budget)
+	assert.NotNil(t, spec.Lock, "afplay must hold the speech lock")
+	data, err := os.ReadFile(audioPath)
+	require.NoError(t, err)
+	assert.Equal(t, "aiff bytes", string(data))
+	playbackWG.Wait()
+	requireSpeechLockFree(t, path)
+}
+
 func TestStartClipWrapsPCMInWAV(t *testing.T) {
 	useTestSpeechLock(t)
 	useTestServer(t)

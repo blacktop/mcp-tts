@@ -30,14 +30,11 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sync"
-	"time"
 
 	"github.com/blacktop/mcp-tts/internal/playback"
-	"github.com/blacktop/mcp-tts/internal/speechlock"
 	"github.com/caarlos0/ctrlc"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/log"
@@ -76,55 +73,61 @@ var (
 	rexTabLabelEnabled bool   // Opt in to temporary Rex tab labels
 )
 
-// startSayPlayback takes the speech lock and starts `say` before returning, so
-// admission and start failures reach the caller. say renders the speech to
-// savedPath, or to a temp file removed afterwards, and afplay then plays it at
-// the configured volume. say never plays to the speakers itself: its embedded
-// volume command is ignored or applied partway through a clip by some voices,
-// Siri voices among them. The work is followed in the background, so request
-// cancellation cannot truncate speech.
-func startSayPlayback(ctx context.Context, baseArgs []string, text, savedPath string) error {
-	lock, err := acquireSpeechLock(ctx, "say_tts")
-	if err != nil {
-		return err
-	}
-	audioPath, removeAudio := savedPath, func() {}
-	if audioPath == "" {
-		if audioPath, removeAudio, err = writeTempFile("mcp-tts-say-*.aiff", nil); err != nil {
-			lock.Release()
-			return fmt.Errorf("preparing say audio: %w", err)
+// renderSay has say write text to an AIFF, in outputDir when saving and in a
+// temp file otherwise, and returns the saved path and, when the audio will be
+// played, its bytes. say only renders and never plays to the speakers itself:
+// some voices, Siri voices among them, ignore its embedded volume command or
+// apply it partway through a clip, so the audio is played like a cloud clip, at
+// the configured volume. A Background session renders inside the GUI session,
+// because say run in the Background session writes a stub file.
+func renderSay(ctx context.Context, mode sessionMode, baseArgs []string, text string) ([]byte, string, error) {
+	var savedPath string
+	outPath, removeOut := "", func() {}
+	if shouldSave() {
+		savedPath = filepath.Join(outputDir, generateFilename(text, "aiff"))
+		outPath = savedPath
+	} else {
+		var err error
+		if outPath, removeOut, err = writeTempFile("mcp-tts-say-*.aiff", nil); err != nil {
+			return nil, "", fmt.Errorf("preparing say audio: %w", err)
 		}
 	}
-	budget := playback.BudgetForText(len(text))
-	renderArgs := sayArgs(baseArgs, text, audioPath)
-	log.Debug("Starting say command", "args", renderArgs)
+	defer removeOut()
+
+	var err error
+	if mode == sessionRoutable {
+		err = guiSayRender(ctx, baseArgs, text, outPath)
+	} else {
+		err = runSay(ctx, sayArgs(baseArgs, text, outPath), len(text))
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	if !shouldPlay() {
+		return nil, savedPath, nil
+	}
+	audio, err := os.ReadFile(outPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("reading say audio: %w", err)
+	}
+	return audio, savedPath, nil
+}
+
+// runSay runs say as a child process, bounded by the budget for textLen
+// characters and by ctx.
+func runSay(ctx context.Context, args []string, textLen int) error {
+	log.Debug("Starting say command", "args", args)
 	proc, err := startPlayback(playback.Spec{
 		Label:    "say_tts",
 		Path:     "/usr/bin/say",
-		Args:     renderArgs,
-		Budget:   budget,
-		Lock:     lock,
+		Args:     args,
+		Budget:   playback.BudgetForText(textLen),
 		Diagnose: playbackDiagnostic(),
 	})
 	if err != nil {
-		lock.Release()
-		removeAudio()
 		return fmt.Errorf("failed to start say command: %w", err)
 	}
-
-	playbackWG.Go(func() {
-		defer lock.Release()
-		defer removeAudio()
-		if err := proc.Wait(serverCtx); err != nil {
-			if serverCtx.Err() == nil {
-				log.Error("Say command failed", "error", err)
-			}
-			return
-		}
-		playSavedSpeech(lock, audioPath, budget)
-		log.Info("Speaking text completed", "text", text)
-	})
-	return nil
+	return proc.Wait(ctx)
 }
 
 // sayArgs returns the say arguments that render text to outPath at full level.
@@ -132,27 +135,20 @@ func sayArgs(baseArgs []string, text, outPath string) []string {
 	return append(append([]string{}, baseArgs...), "-o", outPath, text)
 }
 
-// playSavedSpeech plays an AIFF that `say -o` wrote at the configured volume,
-// under the speech lock the caller already holds.
-func playSavedSpeech(lock *speechlock.Lock, savedPath string, budget time.Duration) {
-	log.Debug("Playing saved AIFF file", "path", savedPath)
-	proc, err := startPlayback(playback.Spec{
-		Label:    "say_tts",
-		Path:     "/usr/bin/afplay",
-		Args:     afplayArgs(savedPath),
-		Budget:   budget,
-		Lock:     lock,
-		Diagnose: playbackDiagnostic(),
+// playAIFF plays rendered say_tts audio through the shared player, GUI-routed
+// when the server runs in a Background session.
+func playAIFF(ctx context.Context, text string, audioData []byte) error {
+	if handled, err := routeCloudPlayback(ctx, "say_tts", clipAIFF, func() ([]byte, error) {
+		return audioData, nil
+	}); handled {
+		return err
+	}
+	return startClip(ctx, clip{
+		label:  "say_tts",
+		format: clipAIFF,
+		data:   audioData,
+		budget: playback.BudgetForText(len(text)),
 	})
-	if err == nil {
-		// Mark the terminal once afplay is running, so marking cannot delay sound.
-		stopSpeaking := beginRexSpeaking(serverCtx)
-		err = proc.Wait(serverCtx)
-		stopSpeaking()
-	}
-	if err != nil && serverCtx.Err() == nil {
-		log.Warn("Failed to play saved audio", "error", err)
-	}
 }
 
 // playMP3 validates and measures the MP3 before anything is played, so a
@@ -548,55 +544,17 @@ Designed to be used with the MCP (Model Context Protocol).`,
 					return errorResult(headlessAudioError(managerName)), nil, nil
 				}
 
-				// Save-only mode: write the file synchronously so we can report
-				// the exact path. say -o writes faster than real time and does
-				// not play, so there is nothing to truncate.
-				if !shouldPlay() {
-					filename := generateFilename(text, "aiff")
-					savedPath := filepath.Join(outputDir, filename)
-					if mode == sessionRoutable {
-						if err := guiSayPlay(ctx, args, text, savedPath, false); err != nil {
-							if ctx.Err() != nil {
-								return textResult("Say command cancelled"), nil, nil
-							}
-							return errorResult(fmt.Sprintf("Error: Say command failed: %v", err)), nil, nil
-						}
-						return textResult(formatSaveResult(text, savedPath, false)), nil, nil
-					}
-					saveArgs := sayArgs(args, text, savedPath)
-					log.Debug("Saving say audio to file", "path", savedPath, "args", saveArgs)
-					if err := exec.CommandContext(ctx, "/usr/bin/say", saveArgs...).Run(); err != nil {
-						if ctx.Err() != nil {
-							return textResult("Say command cancelled"), nil, nil
-						}
-						log.Error("Say command failed", "error", err)
-						return errorResult(fmt.Sprintf("Error: Say command failed: %v", err)), nil, nil
-					}
-					return textResult(formatSaveResult(text, savedPath, false)), nil, nil
-				}
-
-				// Play mode: acquire the speech lock and start `say` before
-				// returning so start/lock failures surface to the caller. The
-				// process is then waited in the background so request
-				// cancellation cannot truncate speech.
-				var savedPath string
-				if shouldSave() {
-					filename := generateFilename(text, "aiff")
-					savedPath = filepath.Join(outputDir, filename)
-				}
-
-				start := startSayPlayback
-				if mode == sessionRoutable {
-					start = startRoutableSayPlayback
-				}
-				if err := start(ctx, args, text, savedPath); err != nil {
+				audio, savedPath, err := renderSay(ctx, mode, args, text)
+				if err != nil {
 					if ctx.Err() != nil {
 						return textResult("Say command cancelled"), nil, nil
 					}
-					log.Error("Failed to start say playback", "routed", mode == sessionRoutable, "error", err)
-					return errorResult(fmt.Sprintf("Error: %v", err)), nil, nil
+					log.Error("Say command failed", "error", err)
+					return errorResult(fmt.Sprintf("Error: Say command failed: %v", err)), nil, nil
 				}
-				return textResult(formatSaveResult(text, savedPath, true)), nil, nil
+				return deliverAudio(ctx, text, audio,
+					func([]byte, string) (string, error) { return savedPath, nil },
+					func(ctx context.Context) error { return playAIFF(ctx, text, audio) })
 			})
 		}
 

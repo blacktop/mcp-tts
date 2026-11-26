@@ -295,74 +295,66 @@ func TestDeliverAudioSurfacesPlaybackStartError(t *testing.T) {
 	assert.Contains(t, extractTextFromMCPResult(result), "cannot open file")
 }
 
-func TestStartSayPlaybackSurfacesStartFailureAndFreesLock(t *testing.T) {
-	path := useTestSpeechLock(t)
-	useTestServer(t)
-	original := startPlayback
-	startPlayback = func(playback.Spec) (*playback.Proc, error) { return nil, errors.New("exec failed") }
-	t.Cleanup(func() { startPlayback = original })
-
-	err := startSayPlayback(context.Background(), []string{"--rate", "200"}, "hello", "")
-	require.ErrorContains(t, err, "failed to start say command")
-	requireSpeechLockFree(t, path)
+// useSaveMode sets the audio-saving options for one test.
+func useSaveMode(t *testing.T, dir string, play bool) {
+	t.Helper()
+	prevDir, prevNoPlay := outputDir, noPlay
+	outputDir, noPlay = dir, !play
+	t.Cleanup(func() { outputDir, noPlay = prevDir, prevNoPlay })
 }
 
-func TestStartSayPlaybackRendersThenPlaysAtVolume(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		saved bool
-	}{
-		{name: "temp file"},
-		{name: "saved file", saved: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			path := useTestSpeechLock(t)
-			useTestServer(t)
-			players := useStandInPlayers(t, []string{"sleep", "300ms"})
-			savedPath := ""
-			if tc.saved {
-				savedPath = filepath.Join(t.TempDir(), "out.aiff")
-				require.NoError(t, os.WriteFile(savedPath, []byte("audio"), 0o600))
-			}
-
-			require.NoError(t, startSayPlayback(context.Background(), []string{"--rate", "200"}, "hello", savedPath))
-			assert.True(t, speechLockHeld(path), "lock must stay held while say is still rendering")
-			playbackWG.Wait()
-			requireSpeechLockFree(t, path)
-
-			started := players.started()
-			require.Len(t, started, 2, "say renders the speech, then afplay plays it")
-			say, afplay := started[0], started[1]
-			require.Len(t, say.Args, 5)
-			audioPath := say.Args[3]
-			assert.Equal(t, "/usr/bin/say", say.Path)
-			assert.Equal(t, []string{"--rate", "200", "-o", audioPath, "hello"}, say.Args)
-			assert.Equal(t, playback.BudgetForText(len("hello")), say.Budget)
-			assert.Equal(t, "/usr/bin/afplay", afplay.Path)
-			assert.Equal(t, []string{"-v", "0.5", audioPath}, afplay.Args, "say must not play itself; afplay applies the volume")
-			assert.Same(t, say.Lock, afplay.Lock, "playback must run under the lock say took")
-			if tc.saved {
-				assert.Equal(t, savedPath, audioPath)
-				assert.FileExists(t, savedPath, "the saved file must be kept")
-				return
-			}
-			assert.Equal(t, ".aiff", filepath.Ext(audioPath))
-			_, err := os.Stat(audioPath)
-			assert.True(t, os.IsNotExist(err), "the temp audio file must be removed after playback")
-		})
-	}
-}
-
-func TestStartSayPlaybackReportsBusyWithoutStartingSay(t *testing.T) {
-	path := useTestSpeechLock(t)
-	useTestServer(t)
-	useAdmissionTimeout(t, 150*time.Millisecond)
-	holdSpeechLock(t, path, "openai_tts")
+func TestRenderSayRendersToTempFileWithoutTheSpeechLock(t *testing.T) {
+	useSaveMode(t, "", true)
 	players := useStandInPlayers(t, []string{"ok"})
 
-	err := startSayPlayback(context.Background(), nil, "hello", "")
-	require.ErrorContains(t, err, "speech is busy")
-	assert.Empty(t, players.started(), "say must not start while other speech holds the lock")
+	audio, savedPath, err := renderSay(context.Background(), sessionAqua, []string{"--rate", "200"}, "hello")
+	require.NoError(t, err)
+	assert.Empty(t, savedPath)
+	assert.NotNil(t, audio, "the rendered audio must be returned for playback")
+
+	started := players.started()
+	require.Len(t, started, 1, "say only renders; nothing plays yet")
+	require.Len(t, started[0].Args, 5)
+	out := started[0].Args[3]
+	assert.Equal(t, "/usr/bin/say", started[0].Path)
+	assert.Equal(t, []string{"--rate", "200", "-o", out, "hello"}, started[0].Args)
+	assert.Equal(t, ".aiff", filepath.Ext(out))
+	assert.Equal(t, playback.BudgetForText(len("hello")), started[0].Budget)
+	assert.Nil(t, started[0].Lock, "rendering makes no sound, so it must not hold the speech lock")
+	_, err = os.Stat(out)
+	assert.True(t, os.IsNotExist(err), "the temp audio file must be removed")
+}
+
+func TestRenderSaySaveOnlyWritesTheSavedFile(t *testing.T) {
+	dir := t.TempDir()
+	useSaveMode(t, dir, false)
+	players := useStandInPlayers(t, []string{"ok"})
+
+	audio, savedPath, err := renderSay(context.Background(), sessionAqua, nil, "hello")
+	require.NoError(t, err)
+	assert.Nil(t, audio, "save-only mode plays nothing, so the audio is not read")
+	assert.Equal(t, dir, filepath.Dir(savedPath))
+	assert.Equal(t, ".aiff", filepath.Ext(savedPath))
+	require.Len(t, players.started(), 1)
+	assert.Equal(t, []string{"-o", savedPath, "hello"}, players.started()[0].Args)
+}
+
+func TestRenderSaySurfacesFailures(t *testing.T) {
+	useSaveMode(t, "", true)
+	t.Run("start", func(t *testing.T) {
+		original := startPlayback
+		startPlayback = func(playback.Spec) (*playback.Proc, error) { return nil, errors.New("exec failed") }
+		t.Cleanup(func() { startPlayback = original })
+
+		_, _, err := renderSay(context.Background(), sessionAqua, nil, "hello")
+		require.ErrorContains(t, err, "failed to start say command")
+	})
+	t.Run("exit", func(t *testing.T) {
+		useStandInPlayers(t, []string{"fail", "voice not installed"})
+
+		_, _, err := renderSay(context.Background(), sessionAqua, nil, "hello")
+		require.ErrorContains(t, err, "voice not installed")
+	})
 }
 
 // skipWithoutVoiceSay skips tests that run voice-say itself, which feeds text

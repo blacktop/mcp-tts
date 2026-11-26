@@ -235,19 +235,6 @@ var (
 	waitGUIJobFn  = waitGUIJob
 )
 
-// runInGUISession runs a one-shot command (program + args, e.g. /usr/bin/say or
-// /usr/bin/afplay) inside the user's gui/<uid> Aqua domain via a transient
-// launchd job, blocks until it exits, and returns the job's error. It always
-// boots the job out and removes its temp plist + stderr file. ctx cancellation
-// and an internal timeout both stop the job and clean up.
-func runInGUISession(ctx context.Context, program string, args []string) error {
-	handle, err := startGUIJobFn(ctx, program, args)
-	if err != nil {
-		return err
-	}
-	return waitGUIJobFn(ctx, handle)
-}
-
 // guiJobState is what launchd reports about a job after an attempt to remove it.
 type guiJobState int
 
@@ -489,95 +476,28 @@ func killGUIJob(label string) {
 	}
 }
 
-// startGUISay bootstraps a say synthesis into the GUI session synchronously,
-// returning a wait func and a cleanup func. text is written to a temp file
-// consumed via `say -f`, keeping user text out of the plist. baseArgs is the
-// validated [--rate N (--voice V)?] slice from sayCommandArgs. say renders to
-// savedPath, or to a temp AIFF when there is none; when play is true, wait then
-// plays that file through afplay at the configured volume (startSayPlayback
-// explains why say never plays itself). A bootstrap failure is returned here so
-// the say handler can report an error instead of a misleading "Speaking:" result.
-func startGUISay(
-	ctx context.Context, baseArgs []string, text, savedPath string, play bool,
-) (wait func(context.Context) error, cleanup func(), err error) {
+// guiSayRender has say write text to outPath from inside the GUI session and
+// waits for it to finish. A Background session cannot render itself: say run
+// there writes a stub file. text is written to a temp file consumed via
+// `say -f`, keeping user text out of the plist. baseArgs is the validated
+// [--rate N (--voice V)?] slice from sayCommandArgs. Bootstrap and exit errors
+// reach the caller.
+func guiSayRender(ctx context.Context, baseArgs []string, text, outPath string) error {
 	txtPath, removeTxt, err := writeTempFile("mcp-tts-say-*.txt", []byte(text))
 	if err != nil {
-		return nil, nil, fmt.Errorf("preparing say text for GUI routing: %w", err)
+		return fmt.Errorf("preparing say text for GUI routing: %w", err)
 	}
-	audioPath, removeAudio := savedPath, func() {}
-	if audioPath == "" {
-		if audioPath, removeAudio, err = writeTempFile("mcp-tts-say-*.aiff", nil); err != nil {
-			removeTxt()
-			return nil, nil, fmt.Errorf("preparing say audio for GUI routing: %w", err)
-		}
-	}
-	cleanup = func() {
-		removeTxt()
-		removeAudio()
-	}
+	defer removeTxt()
 
-	sayArgs := append(append([]string{}, baseArgs...), "-o", audioPath, "-f", txtPath)
+	sayArgs := append(append([]string{}, baseArgs...), "-o", outPath, "-f", txtPath)
 	handle, err := startGUIJobFn(ctx, sayBinPath, sayArgs)
 	if err != nil {
-		cleanup()
-		return nil, nil, err
-	}
-
-	wait = func(waitCtx context.Context) error {
-		if err := waitGUIJobFn(waitCtx, handle); err != nil {
-			return err
-		}
-		if !play {
-			return nil
-		}
-		stopSpeaking := beginRexSpeaking(waitCtx)
-		defer stopSpeaking()
-		return runInGUISession(waitCtx, afplayBinPath, afplayArgs(audioPath))
-	}
-	return wait, cleanup, nil
-}
-
-// guiSayPlay routes a say synthesis (and, when playing, afplay of the result) through
-// the GUI session, blocking until it completes. It surfaces bootstrap and exit
-// errors to the caller; the save-only handler path relies on this synchronous
-// contract.
-func guiSayPlay(ctx context.Context, baseArgs []string, text, savedPath string, play bool) error {
-	wait, cleanup, err := startGUISay(ctx, baseArgs, text, savedPath, play)
-	if err != nil {
-		// No speech lock is held here; this only keeps retrying the removal
-		// of a job whose bootstrap timed out.
+		// No speech lock is held while rendering; this only keeps retrying
+		// the removal of a job whose bootstrap timed out.
 		settleGUIStartFailure(err, func() {})
 		return err
 	}
-	defer cleanup()
-	return wait(ctx)
-}
-
-// startRoutableSayPlayback takes the speech lock and bootstraps a GUI-routed say
-// job synchronously — surfacing admission and launchctl bootstrap failures to
-// the caller, mirroring the startSayPlayback contract — then detaches the wait
-// so a cancelled request cannot truncate speech.
-func startRoutableSayPlayback(ctx context.Context, baseArgs []string, text, savedPath string) error {
-	lock, err := acquireSpeechLock(ctx, "say_tts")
-	if err != nil {
-		return err
-	}
-	wait, cleanup, err := startGUISay(serverCtx, baseArgs, text, savedPath, true)
-	if err != nil {
-		settleGUIStartFailure(err, lock.Release)
-		return err
-	}
-	playbackWG.Go(func() {
-		defer cleanup()
-		err := wait(serverCtx)
-		if err != nil && serverCtx.Err() == nil {
-			log.Error("GUI-routed say failed", "error", err)
-		}
-		// wait bootstraps a second job to play the rendered file. If that
-		// timed out, the lock is kept while the job may still be speaking.
-		settleGUIStartFailure(err, lock.Release)
-	})
-	return nil
+	return waitGUIJobFn(ctx, handle)
 }
 
 // playViaGUI saves a fully-buffered cloud audio payload to a temp file and plays
